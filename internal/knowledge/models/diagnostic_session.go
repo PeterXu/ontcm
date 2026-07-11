@@ -35,6 +35,12 @@ type DiagnosticSession struct {
 	Adjustments     []FormulaAdjustment // Dose adjustments
 	Prescription    *Prescription       // Final prescription
 
+	// LLM Refinement
+	// When the rule-based scorer cannot decide (tied candidates), an optional
+	// LLM may resolve the tie. This records the LLM's reasoning; if empty, the
+	// selection was purely rule-based.
+	LLMRefinementReason string
+
 	// Conversation History
 	Conversation    []ConversationTurn  // Q&A history
 

@@ -9,6 +9,7 @@ import (
 
 	"ontcm/internal/agent"
 	"ontcm/internal/knowledge"
+	"ontcm/internal/llm"
 	"ontcm/internal/web/handlers"
 	"ontcm/internal/web/middleware"
 	"ontcm/internal/web/session"
@@ -16,11 +17,12 @@ import (
 
 // Server represents the HTTP server
 type Server struct {
-	router  *gin.Engine
-	loader  *knowledge.Loader
-	index   *knowledge.InvertedIndex
-	config  *Config
-	version string
+	router          *gin.Engine
+	loader          *knowledge.Loader
+	index           *knowledge.InvertedIndex
+	config          *Config
+	version         string
+	diagnosticAgent *agent.DiagnosticAgent
 }
 
 // Config represents server configuration
@@ -95,11 +97,20 @@ func NewServer(loader *knowledge.Loader, index *knowledge.InvertedIndex, config 
 	setupRoutes(router, formulaHandler, herbHandler, healthHandler, diagnosticHandler)
 
 	return &Server{
-		router:  router,
-		loader:  loader,
-		index:   index,
-		config:  config,
-		version: "1.0.0",
+		router:          router,
+		loader:          loader,
+		index:           index,
+		config:          config,
+		version:         "1.0.0",
+		diagnosticAgent: diagnosticAgent,
+	}
+}
+
+// SetLLMClient injects an LLM client into the diagnostic agent, enabling
+// tie-break refinement in step 12. Pass nil to disable (pure rule-based).
+func (s *Server) SetLLMClient(c llm.LLMClient) {
+	if s.diagnosticAgent != nil {
+		s.diagnosticAgent.SetLLMClient(c)
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"ontcm/internal/knowledge"
+	"ontcm/internal/llm"
 	"ontcm/internal/web"
 )
 
@@ -56,6 +57,17 @@ func main() {
 	}
 
 	server := web.NewServer(loader, index, config)
+
+	// Optional LM Studio integration for step-12 tie-break refinement.
+	// Disabled unless ONTCM_LLM_ENABLED is set; the agent stays rule-based.
+	if llmCfg := loadLLMConfig(); llmCfg.Enabled {
+		client := llm.NewLMStudioClient(llmCfg)
+		server.SetLLMClient(client)
+		log.Printf("LLM enabled: endpoint=%s model=%s timeout=%s",
+			llmCfg.Endpoint, llmCfg.Model, llmCfg.Timeout)
+	} else {
+		log.Printf("LLM disabled (set ONTCM_LLM_ENABLED=1 to enable step-12 refinement)")
+	}
 
 	// Create HTTP server with timeouts
 	addr := fmt.Sprintf("%s:%d", config.Host, config.Port)
@@ -104,4 +116,30 @@ func parsePort(portStr string) int {
 		return 8080 // Default
 	}
 	return port
+}
+
+// loadLLMConfig builds the LLM client config from environment variables,
+// falling back to defaults that point at a local LM Studio.
+//
+//	ONTCM_LLM_ENABLED  "1"/"true" to enable (default: disabled)
+//	ONTCM_LLM_ENDPOINT base URL, e.g. http://192.168.50.17:1234
+//	ONTCM_LLM_MODEL    model id, e.g. shizhengpt-7b-vl-i1
+//	ONTCM_LLM_TIMEOUT  per-request timeout, e.g. 60s
+func loadLLMConfig() llm.Config {
+	cfg := llm.DefaultConfig()
+	if v := os.Getenv("ONTCM_LLM_ENABLED"); v == "1" || v == "true" || v == "TRUE" {
+		cfg.Enabled = true
+	}
+	if v := os.Getenv("ONTCM_LLM_ENDPOINT"); v != "" {
+		cfg.Endpoint = v
+	}
+	if v := os.Getenv("ONTCM_LLM_MODEL"); v != "" {
+		cfg.Model = v
+	}
+	if v := os.Getenv("ONTCM_LLM_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.Timeout = d
+		}
+	}
+	return cfg
 }

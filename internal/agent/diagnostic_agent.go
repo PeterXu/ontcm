@@ -7,6 +7,7 @@ import (
 
 	"ontcm/internal/knowledge"
 	"ontcm/internal/knowledge/models"
+	"ontcm/internal/llm"
 )
 
 // DiagnosticAgent orchestrates the 12-step diagnostic process
@@ -14,6 +15,14 @@ type DiagnosticAgent struct {
 	loader       *knowledge.Loader
 	index        *knowledge.InvertedIndex
 	sessionStore SessionStore
+	llm          llm.LLMClient // optional; nil = rule-based only
+}
+
+// SetLLMClient attaches an LLM client used to resolve tied formula candidates
+// in step 12. Passing nil disables LLM refinement (pure rule-based). Safe to
+// call once at construction; not safe to call concurrently with diagnostics.
+func (a *DiagnosticAgent) SetLLMClient(c llm.LLMClient) {
+	a.llm = c
 }
 
 // SessionStore interface for session persistence

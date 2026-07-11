@@ -88,10 +88,12 @@ docs/*.md → Loader → InvertedIndex → Agent → Handler → REST API
 - `github.com/google/uuid` - Session IDs
 - `github.com/stretchr/testify` - Testing assertions
 
-## LM Studio Integration (Future)
-- Endpoint: `http://192.168.50.17:1234/v1/chat/completions`
-- Model: `shizhengpt-7b-vl-i1`
-- For: Dynamic question generation (currently using templates)
+## LM Studio Integration (Phase 4) — IMPLEMENTED
+- **Package**: `internal/llm/` — provider-agnostic `LLMClient` interface + `LMStudioClient` (OpenAI-compatible, stdlib `net/http`) + `FakeClient` for tests.
+- **What it does**: resolves *tied* formula candidates in step 12 (选方定药). When rule-based scoring can't decide (e.g. the 承气汤 family for 阳明腑实), the agent asks the LLM to pick, validates the choice is among the tied set, and records the reason in `DiagnosticSession.LLMRefinementReason`. On any failure (no client, no tie, network error, unparseable/invalid response) it falls back silently to the rule-based pick.
+- **Config** (env vars, opt-in): `ONTCM_LLM_ENABLED=1`, `ONTCM_LLM_ENDPOINT` (default `http://192.168.50.17:1234`), `ONTCM_LLM_MODEL` (default `shizhengpt-7b-vl-i1`), `ONTCM_LLM_TIMEOUT` (default `60s`). Disabled by default — the server runs pure rule-based unless enabled.
+- **Tests**: offline unit tests use `FakeClient` (refinement picks LLM choice; fallback on nil/error; LLM not called when no tie; invalid choice rejected). Live test gated behind `ONTCM_LLM_LIVE=1`.
+- **Future use cases** (reuse the same client): dynamic question generation, free-text symptom intake, contradiction reasoning.
 
 ## Development Workflow
 1. Make changes

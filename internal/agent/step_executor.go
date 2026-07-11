@@ -1,11 +1,13 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
 
 	"ontcm/internal/knowledge/models"
+	"ontcm/internal/llm"
 )
 
 // executeStep1 processes patient information input
@@ -451,6 +453,17 @@ func (a *DiagnosticAgent) executeStep12(session *models.DiagnosticSession, input
 
 	session.SelectedFormula = selectedFormula
 
+	// If the top candidates are tied, the rule-based score cannot decide
+	// between them. When an LLM is available, ask it to resolve the tie;
+	// otherwise leave the rule-based pick. See refineFormulaSelection.
+	if chosenID, reason, ok := a.refineFormulaSelection(session); ok {
+		if f := a.loader.GetFormula(chosenID); f != nil {
+			session.SelectedFormula = f
+			session.LLMRefinementReason = reason
+			selectedFormula = f
+		}
+	}
+
 	// Check contraindications
 	for _, contraindication := range selectedFormula.Contraindications {
 		// Check if patient has contraindicated condition
@@ -466,6 +479,98 @@ func (a *DiagnosticAgent) executeStep12(session *models.DiagnosticSession, input
 	}
 
 	return nil
+}
+
+// refineFormulaSelection asks the attached LLM to choose among the top-scoring
+// candidates when rule-based scoring cannot decide between them (a tie).
+//
+// It returns (chosenID, reason, true) only when an LLM is attached, two or
+// more candidates are tied at the top score, the LLM responds with a valid
+// JSON choice, AND that choice is among the tied candidates. Anything else —
+// no LLM, no tie, LLM error, unparseable response, or an out-of-set choice —
+// returns (..., false) so the caller keeps the rule-based selection.
+//
+// FormulaCandidates must already be sorted by score descending (executeStep12
+// sorts before calling).
+func (a *DiagnosticAgent) refineFormulaSelection(session *models.DiagnosticSession) (chosenID, reason string, ok bool) {
+	if a.llm == nil || len(session.FormulaCandidates) < 2 {
+		return "", "", false
+	}
+
+	// Collect candidates tied with the top score (small delta for float noise).
+	top := session.FormulaCandidates[0].MatchScore
+	tied := make([]models.FormulaMatch, 0)
+	for _, c := range session.FormulaCandidates {
+		if c.MatchScore >= top-0.01 {
+			tied = append(tied, c)
+		}
+	}
+	if len(tied) < 2 {
+		return "", "", false
+	}
+
+	selCtx := a.buildSelectionContext(session, tied)
+	resp, err := a.llm.Complete(context.Background(), llm.CompleteRequest{
+		Messages:    llm.BuildFormulaSelectionMessages(selCtx),
+		Temperature: 0.2,
+		MaxTokens:   300,
+	})
+	if err != nil {
+		return "", "", false
+	}
+
+	id, reason, err := llm.ParseFormulaChoice(resp.Content)
+	if err != nil {
+		return "", "", false
+	}
+
+	// Reject choices outside the tied set — guards against LLM hallucination.
+	for _, c := range tied {
+		if c.FormulaID == id {
+			return id, reason, true
+		}
+	}
+	return "", "", false
+}
+
+// buildSelectionContext assembles the evidence and candidate descriptions the
+// LLM needs to choose a formula.
+func (a *DiagnosticAgent) buildSelectionContext(session *models.DiagnosticSession, tied []models.FormulaMatch) llm.SelectionContext {
+	selCtx := llm.SelectionContext{Meridian: session.Meridian.String()}
+
+	for _, s := range session.Symptoms {
+		// Stored as "question label: value" — keep just the value for the LLM.
+		v := s.Symptom
+		if i := strings.Index(v, ": "); i >= 0 {
+			v = v[i+2:]
+		}
+		if v != "" {
+			selCtx.Symptoms = append(selCtx.Symptoms, v)
+		}
+	}
+
+	if session.Tongue.Color != "" || session.Tongue.CoatingColor != "" {
+		selCtx.Tongue = strings.TrimSpace(session.Tongue.Color + " " + session.Tongue.CoatingColor)
+	}
+	if session.Pulse.Type != "" {
+		selCtx.Pulse = session.Pulse.Type
+		if len(session.Pulse.Characteristics) > 0 {
+			selCtx.Pulse += " " + strings.Join(session.Pulse.Characteristics, "、")
+		}
+	}
+
+	for _, c := range tied {
+		f := a.loader.GetFormula(c.FormulaID)
+		if f == nil {
+			continue
+		}
+		ci := llm.CandidateInfo{FormulaID: c.FormulaID, FormulaName: f.Name}
+		for _, ks := range f.KeySymptoms {
+			ci.KeySymptoms = append(ci.KeySymptoms, ks.Name)
+		}
+		selCtx.Candidates = append(selCtx.Candidates, ci)
+	}
+	return selCtx
 }
 
 // Helper functions
