@@ -10,7 +10,7 @@
 | [quick_reference.md](quick_reference.md) | 速查表（表格化、一页式） | 临床快速查阅 |
 | [checklist.md](checklist.md) | 辨证检查清单 | 临床逐项核对，避免漏项 |
 | [flowchart.md](flowchart.md) | 辨证流程图 | 可视化理解流程和决策点 |
-| [common_herbs.md](common_herbs.md) | 常用中药层次清单 | 进药备货参考 |
+| [herbs/](herbs/index.md) | 中药材文档（三档分类体系） | 进药备货、存储管理、药证学习 |
 
 ### 方剂药证详解
 
