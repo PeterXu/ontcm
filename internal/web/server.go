@@ -9,6 +9,7 @@ import (
 
 	"ontcm/internal/knowledge"
 	"ontcm/internal/web/handlers"
+	"ontcm/internal/web/middleware"
 )
 
 // Server represents the HTTP server
@@ -41,7 +42,7 @@ func DefaultConfig() *Config {
 		WriteTimeout:  10 * time.Second,
 		MaxConcurrent: 100,
 		EnableCORS:    true,
-		CORSOrigins:   []string{"*"},
+		CORSOrigins:   []string{"localhost", "127.0.0.1"}, // Explicit origins only
 		RateLimit:     1000, // 1000 req/min
 	}
 }
@@ -58,8 +59,17 @@ func NewServer(loader *knowledge.Loader, index *knowledge.InvertedIndex, config 
 	// Create router
 	router := gin.New()
 
-	// Add middleware
-	router.Use(gin.Logger())
+	// Add security middleware
+	router.Use(middleware.SecurityHeaders())
+
+	// Add input validation middleware
+	router.Use(middleware.InputValidation())
+
+	// Add logging middleware
+	router.Use(middleware.Logger())
+	router.Use(middleware.ErrorLogger())
+
+	// Add recovery middleware
 	router.Use(gin.Recovery())
 
 	// Add CORS middleware if enabled
