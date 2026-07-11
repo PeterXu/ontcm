@@ -7,9 +7,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"ontcm/internal/agent"
 	"ontcm/internal/knowledge"
 	"ontcm/internal/web/handlers"
 	"ontcm/internal/web/middleware"
+	"ontcm/internal/web/session"
 )
 
 // Server represents the HTTP server
@@ -77,13 +79,20 @@ func NewServer(loader *knowledge.Loader, index *knowledge.InvertedIndex, config 
 		router.Use(corsMiddleware(config.CORSOrigins))
 	}
 
+	// Create session store
+	sessionStore := session.NewInMemoryStore(30 * time.Minute)
+
+	// Create diagnostic agent
+	diagnosticAgent := agent.NewDiagnosticAgent(loader, index, sessionStore)
+
 	// Create handlers
 	formulaHandler := handlers.NewFormulaHandler(loader, index)
 	herbHandler := handlers.NewHerbHandler(loader, index)
 	healthHandler := handlers.NewHealthHandler(loader, index, "1.0.0")
+	diagnosticHandler := handlers.NewDiagnosticHandler(diagnosticAgent, loader, index)
 
 	// Setup routes
-	setupRoutes(router, formulaHandler, herbHandler, healthHandler)
+	setupRoutes(router, formulaHandler, herbHandler, healthHandler, diagnosticHandler)
 
 	return &Server{
 		router:  router,
@@ -95,10 +104,20 @@ func NewServer(loader *knowledge.Loader, index *knowledge.InvertedIndex, config 
 }
 
 // setupRoutes configures all API routes
-func setupRoutes(router *gin.Engine, formulaHandler *handlers.FormulaHandler, herbHandler *handlers.HerbHandler, healthHandler *handlers.HealthHandler) {
+func setupRoutes(router *gin.Engine, formulaHandler *handlers.FormulaHandler, herbHandler *handlers.HerbHandler, healthHandler *handlers.HealthHandler, diagnosticHandler *handlers.DiagnosticHandler) {
 	// Health check endpoints
 	router.GET("/api/v1/health", healthHandler.Check)
 	router.GET("/api/v1/stats", healthHandler.Stats)
+
+	// Diagnostic workflow endpoints
+	diagnostic := router.Group("/api/v1/diagnostic")
+	{
+		diagnostic.POST("", diagnosticHandler.StartSession)                 // Start new session
+		diagnostic.POST("/:session_id/step", diagnosticHandler.ProcessStep) // Process step
+		diagnostic.GET("/:session_id/state", diagnosticHandler.GetSessionState) // Get state
+		diagnostic.DELETE("/:session_id", diagnosticHandler.EndSession)    // End session
+		diagnostic.POST("/quick-formula", diagnosticHandler.QuickFormula)  // Quick recommendation
+	}
 
 	// Formula endpoints
 	formulas := router.Group("/api/v1/formulas")
@@ -124,10 +143,16 @@ func setupRoutes(router *gin.Engine, formulaHandler *handlers.FormulaHandler, he
 			"name":    "OntCM API",
 			"version": "1.0.0",
 			"description": "Traditional Chinese Medicine (TCM) Knowledge Base API",
+			"features": []string{
+				"Complete 12-step 六经辨证 diagnostic workflow",
+				"Quick formula recommendation",
+				"Formula and herb query",
+			},
 			"endpoints": gin.H{
-				"health":  "/api/v1/health",
-				"formulas": "/api/v1/formulas",
-				"herbs":    "/api/v1/herbs",
+				"health":    "/api/v1/health",
+				"diagnostic": "/api/v1/diagnostic",
+				"formulas":  "/api/v1/formulas",
+				"herbs":     "/api/v1/herbs",
 			},
 			"stats": gin.H{
 				"formulas_loaded": 112,
