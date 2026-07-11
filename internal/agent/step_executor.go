@@ -62,7 +62,7 @@ func (a *DiagnosticAgent) executeStep2(session *models.DiagnosticSession, input 
 // executeStep3 processes 十问 (ten questions) input
 func (a *DiagnosticAgent) executeStep3(session *models.DiagnosticSession, input map[string]interface{}) error {
 	// Process each category of questions
-	for _, category := range Step2Categories {
+	for _, category := range Step3Categories {
 		for _, question := range category.Questions {
 			if value, ok := input[question.ID]; ok {
 				// Create symptom evidence
@@ -256,9 +256,41 @@ func (a *DiagnosticAgent) executeStep7(session *models.DiagnosticSession, input 
 		}
 	}
 
-	// Calculate match scores
-	for i := range session.FormulaCandidates {
-		session.FormulaCandidates[i].MatchScore = float64(len(session.FormulaCandidates[i].MatchedSymptoms))
+	// Calculate match scores.
+	//
+	// Score is not just the count of matched symptoms: it rewards formulas
+	// whose meridian agrees with the determination (定经) and formulas whose
+	// required symptoms the patient actually has. Without these tie-breakers,
+	// formulas that merely *mention* a symptom (e.g. in a 鉴别/禁忌 note) tie
+	// with the correct formula and the winner is nondeterministic — e.g. 桂枝汤
+	// mentions 无汗 only to contrast with 麻黄汤, yet tied with it on raw count.
+	for i, candidate := range session.FormulaCandidates {
+		formula := a.loader.GetFormula(candidate.FormulaID)
+		if formula == nil {
+			continue
+		}
+
+		score := float64(len(candidate.MatchedSymptoms))
+
+		// Bonus: formula belongs to the meridian determined in step 6.
+		if session.Meridian != models.MeridianOther && formula.Meridian == session.Meridian {
+			score += 1.0
+		}
+
+		// Bonus: each required symptom present in the patient's evidence.
+		for _, fs := range formula.KeySymptoms {
+			if !fs.Required {
+				continue
+			}
+			for _, matched := range candidate.MatchedSymptoms {
+				if strings.Contains(matched, fs.Name) || strings.Contains(fs.Name, matched) {
+					score += 0.5
+					break
+				}
+			}
+		}
+
+		session.FormulaCandidates[i].MatchScore = score
 	}
 
 	return nil
@@ -439,18 +471,22 @@ func (a *DiagnosticAgent) executeStep12(session *models.DiagnosticSession, input
 // Helper functions
 
 func (a *DiagnosticAgent) inferMeridianFromTongue(tongue models.TongueReading) models.MeridianType {
-	// Simple rule-based inference
-	if strings.Contains(tongue.Color, "淡白") {
-		return models.MeridianTaiyin
-	}
-	if strings.Contains(tongue.Color, "红") || strings.Contains(tongue.Color, "绛") {
-		return models.MeridianYangming
-	}
+	// A pathological coating is diagnostically meaningful even when the
+	// tongue body is normal, so check coating first.
 	if strings.Contains(tongue.CoatingColor, "黄") {
 		return models.MeridianYangming
 	}
 	if strings.Contains(tongue.CoatingColor, "白腻") {
 		return models.MeridianTaiyin
+	}
+	// Body color. 淡白 (pale) → 虚寒 (太阴). 淡红 is the NORMAL tongue color,
+	// so it must be excluded from the 热 rule even though it contains 红.
+	if strings.Contains(tongue.Color, "淡白") {
+		return models.MeridianTaiyin
+	}
+	if (strings.Contains(tongue.Color, "红") || strings.Contains(tongue.Color, "绛")) &&
+		!strings.Contains(tongue.Color, "淡红") {
+		return models.MeridianYangming
 	}
 
 	return models.MeridianOther

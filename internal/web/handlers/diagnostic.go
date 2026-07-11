@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -248,7 +249,8 @@ func (h *DiagnosticHandler) QuickFormula(c *gin.Context) {
 		matched := make([]string, 0)
 		for _, symptom := range req.Symptoms {
 			for _, keySymptom := range formula.KeySymptoms {
-				if contains(keySymptom.Name, symptom) {
+				if strings.Contains(keySymptom.Name, symptom) ||
+					strings.Contains(keySymptom.ClinicalSign, symptom) {
 					matched = append(matched, keySymptom.Name)
 					break
 				}
@@ -309,8 +311,8 @@ func (h *DiagnosticHandler) getQuestionForStep(step int) interface{} {
 	}
 
 	if step == 3 {
-		// Step 2 (十问) uses categories
-		return agent.GetStep2Categories()
+		// Step 3 (十问为纲) uses categories
+		return agent.GetStep3Categories()
 	}
 
 	// Other steps use templates
@@ -320,10 +322,6 @@ func (h *DiagnosticHandler) getQuestionForStep(step int) interface{} {
 	}
 
 	return template
-}
-
-func contains(str, substr string) bool {
-	return len(str) >= len(substr) && (str == substr || len(str) > len(substr))
 }
 
 // Request/Response models

@@ -94,8 +94,9 @@ var Step1Template = QuestionTemplate{
 	},
 }
 
-// Step 2: 十问为纲 (split into categories)
-var Step2Categories = []QuestionCategory{
+// Step 3: 十问为纲 (Ten-question inquiry, split into categories)
+// This is step 3 in the workflow (step 2 is the emergency-check gate).
+var Step3Categories = []QuestionCategory{
 	{
 		Name:  "吃",
 		Icon:  "🍚",
@@ -352,9 +353,11 @@ var Step2Categories = []QuestionCategory{
 	},
 }
 
-// Step 3: 舌诊
-var Step3Template = QuestionTemplate{
-	Step:        3,
+// Step 4: 舌诊 (Tongue diagnosis)
+// Step 2 is the emergency-check gate and has no questions, so the tongue
+// template — the first question-bearing step after 十问 — is step 4.
+var Step4Template = QuestionTemplate{
+	Step:        4,
 	Title:       "舌诊",
 	Description: "观察舌质和舌苔情况",
 	Instructions: "在光线充足处观察，伸舌自然放松。",
@@ -392,9 +395,9 @@ var Step3Template = QuestionTemplate{
 	},
 }
 
-// Step 4: 脉诊
-var Step4Template = QuestionTemplate{
-	Step:        4,
+// Step 5: 脉诊 (Pulse diagnosis)
+var Step5Template = QuestionTemplate{
+	Step:        5,
 	Title:       "脉诊",
 	Description: "诊察脉象特征",
 	Instructions: "患者取坐位或仰卧位，手腕放平，医生用食指、中指、无名指诊脉。",
@@ -445,21 +448,23 @@ var EmergencySymptoms = []string{
 	"意识模糊、抽搐",
 }
 
-// GetStepTemplate returns the question template for a given step
+// GetStepTemplate returns the question template for a given step.
+// Step 2 (emergency check) and step 3 (十问, served by GetStep3Categories)
+// have no single template, so they return nil.
 func GetStepTemplate(step int) *QuestionTemplate {
 	switch step {
 	case 1:
-		return &Step1Template
-	case 3:
-		return &Step3Template
+		return &Step1Template // 主诉与病史
 	case 4:
-		return &Step4Template
+		return &Step4Template // 舌诊
+	case 5:
+		return &Step5Template // 脉诊
 	default:
 		return nil
 	}
 }
 
-// GetStep2Categories returns the categories for Step 2
-func GetStep2Categories() []QuestionCategory {
-	return Step2Categories
+// GetStep3Categories returns the 十问 categories for step 3.
+func GetStep3Categories() []QuestionCategory {
+	return Step3Categories
 }

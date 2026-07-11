@@ -43,10 +43,24 @@ func (idx *InvertedIndex) BuildIndex(loader *Loader) {
 
 		// Index by key symptoms
 		for _, symptom := range formula.KeySymptoms {
-			keywords := extractKeywords(symptom.Name)
-			for _, keyword := range keywords {
-				idx.addSymptomToFormula(keyword, formulaID)
-				idx.addFormulaToSymptom(formulaID, keyword)
+			// Whole terms from the canonical name (e.g., "食不下") and the
+			// clinical manifestation (e.g., "食欲差、不想吃"). The clinical sign
+			// is written in patient vocabulary and bridges the terminology gap
+			// between the formula's canonical terms and the patient's words.
+			terms := extractKeywords(symptom.Name)
+			terms = append(terms, extractKeywords(symptom.ClinicalSign)...)
+			for _, term := range terms {
+				idx.addSymptomToFormula(term, formulaID)
+				idx.addFormulaToSymptom(formulaID, term)
+				// Also index rune bigrams of multi-character terms so a
+				// patient's shorter term matches a formula's longer one
+				// (e.g., patient "便秘" matches formula "大便秘结多日"). Bigrams
+				// are added on the INDEX side only; queries stay whole-term to
+				// avoid false-positive bloat.
+				for _, bg := range runeBigrams(term) {
+					idx.addSymptomToFormula(bg, formulaID)
+					idx.addFormulaToSymptom(formulaID, bg)
+				}
 			}
 		}
 
@@ -229,51 +243,55 @@ func (idx *InvertedIndex) addHerbToSymptom(herbID, symptom string) {
 	idx.HerbToSymptom[herbID] = append(idx.HerbToSymptom[herbID], symptom)
 }
 
-// extractKeywords extracts searchable keywords from a symptom string
+// runeBigrams returns the 2-rune sliding windows of a term, for terms longer
+// than two runes. It operates on runes (not bytes) so Chinese characters are
+// never split mid-character.
+func runeBigrams(term string) []string {
+	runes := []rune(term)
+	if len(runes) <= 2 {
+		return nil
+	}
+	grams := make([]string, 0, len(runes)-1)
+	for i := 0; i < len(runes)-1; i++ {
+		grams = append(grams, string(runes[i:i+2]))
+	}
+	return grams
+}
+
+// extractKeywords extracts searchable keywords from a symptom string.
+//
+// Keyword extraction works on whole terms split on common Chinese/Western
+// delimiters. It deliberately does NOT slice Chinese strings into fixed-width
+// segments: Chinese characters are multi-byte in UTF-8, so byte-level slicing
+// (e.g. text[i:i+2]) cuts characters in half and produces invalid byte
+// sequences that collide unpredictably between unrelated terms, causing massive
+// false-positive matches.
 func extractKeywords(text string) []string {
-	// Remove common punctuation and whitespace
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return nil
 	}
 
-	keywords := []string{}
-
-	// Split by common delimiters
-	delimiters := []string{",", "，", "、", "；", ";", "和", "与", "或"}
-
-	// Simple keyword extraction
-	// For Chinese text, we'll use character-based splitting for short keywords
-	// and whole-text matching for longer phrases
-
-	// Add the whole text as a keyword (for exact match)
-	keywords = append(keywords, text)
-
-	// Split by delimiters
+	// Split on common Chinese and Western delimiters, progressively.
+	delimiters := []string{",", "，", "、", "；", ";", "和", "与", "或", "/", "（", "）", "(", ")", " "}
+	parts := []string{text}
 	for _, delim := range delimiters {
-		if strings.Contains(text, delim) {
-			parts := strings.Split(text, delim)
-			for _, part := range parts {
-				part = strings.TrimSpace(part)
-				if part != "" && len(part) >= 2 {
-					keywords = append(keywords, part)
-				}
-			}
+		var split []string
+		for _, p := range parts {
+			split = append(split, strings.Split(p, delim)...)
 		}
+		parts = split
 	}
 
-	// For short symptoms (2-4 characters), add as single keyword
-	// For longer symptoms, also add individual 2-character segments
-	if len(text) <= 4 {
-		// Already added as whole text
-	} else if len(text) <= 10 {
-		// Add 2-character segments
-		for i := 0; i < len(text)-1; i++ {
-			segment := text[i:min(i+2, len(text))]
-			if len(segment) == 2 {
-				keywords = append(keywords, segment)
-			}
+	keywords := make([]string, 0, len(parts))
+	seen := make(map[string]bool, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" || seen[part] {
+			continue
 		}
+		seen[part] = true
+		keywords = append(keywords, part)
 	}
 
 	return keywords
@@ -314,11 +332,4 @@ func (s *TFIDFScorer) CalculateScore(keywords []string, formulaID string, index 
 	tf = tf / float64(len(keywords))
 
 	return tf
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

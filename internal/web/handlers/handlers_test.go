@@ -15,7 +15,7 @@ import (
 func setupTestServer() (*gin.Engine, *knowledge.Loader, *knowledge.InvertedIndex) {
 	gin.SetMode(gin.TestMode)
 
-	loader := knowledge.NewLoader("../../docs")
+	loader := knowledge.NewLoader("../../../docs")
 	err := loader.LoadAll()
 	if err != nil {
 		panic("Failed to load knowledge base: " + err.Error())

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"ontcm/internal/knowledge"
@@ -49,6 +50,26 @@ var Steps = []DiagnosticStep{
 		Description:    "Collect chief complaint and patient history",
 		RequiredInput:  []string{},
 		ProducesOutput: []string{"patient_info"},
+		Gates: []GateCondition{
+			{
+				// Emergency triage runs against the chief complaint + history
+				// collected in this step. The dedicated emergency "step 2" is
+				// skipped in normal progression (1→3), so the gate must live
+				// here or emergencies would never be caught.
+				Name: "emergency_check",
+				Check: func(s *models.DiagnosticSession) (bool, string) {
+					text := s.PatientInfo.ChiefComplaint + " " + s.PatientInfo.History
+					for _, emergency := range EmergencySymptoms {
+						if strings.Contains(text, emergency) {
+							return false, "疑似急危重症（" + emergency + "），请立即转诊或急诊处理"
+						}
+					}
+					return true, ""
+				},
+				OnError:     "Emergency detected - session halted",
+				HaltSession: true,
+			},
+		},
 	},
 	{
 		Number:         2,

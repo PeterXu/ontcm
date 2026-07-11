@@ -138,8 +138,22 @@ GET    /api/v1/health                   - Health check
 - Full 12-step diagnostic: <5s
 - Concurrent sessions: 100+
 
+## Phase 8 Status (Testing & Validation) — COMPLETE
+- E2E test drives the full 12-step 太阴 case → reaches 理中汤 (`internal/agent/diagnostic_integration_test.go`)
+- Accuracy benchmark across 5 canonical cases: 定经 5/5, 方证 5/5 (family-aware) (`diagnostic_accuracy_test.go`)
+- Coverage: agent 83.5%, knowledge 77.8% (both exceed ≥70% target)
+
+### Bugs found & fixed in Phase 8
+- **Indexer keyword extraction** was byte-slicing Chinese (`text[i:i+2]`), producing invalid-UTF8 fragments that matched ~33 formulas per query. Now rune-safe, whole-term + delimiter split, plus index-side rune bigrams (patient "便秘" → formula "大便秘结多日").
+- **ClinicalSign not indexed** — only the canonical symptom Name was. Now both Name and ClinicalSign are indexed, bridging formula↔patient vocabulary.
+- **Template/step misalignment** — `GetStepTemplate(4)` returned the pulse template (step 5's), because var names didn't account for step 2 being the emergency gate. Renamed: `Step1Template`, `Step3Categories` (十问), `Step4Template` (舌诊), `Step5Template` (脉诊).
+- **`contains()` helper was a no-op** in `handlers/diagnostic.go`, making quick-formula match everything. Replaced with `strings.Contains`.
+- **Emergency triage was dead code** — `executeStep2` never runs (1→3 progression). Added a real emergency gate to step 1 that halts the session.
+- **Step 7 scoring** now adds bonuses for matching the determined meridian and required symptoms, breaking ties (e.g. 麻黄汤 vs 桂枝汤 both matched 无汗).
+- **`inferMeridianFromTongue`** classified the normal 淡红 tongue as 阳明 (naive 红 match). 淡红 is now correctly normal.
+- Test path bug: `handlers_test.go` used `../../docs` (resolved to nonexistent `internal/docs`, silently loading 0 formulas). Fixed to `../../../docs`.
+
 ## Next Steps
-- Test with `docs/examples/taiyin_case.md`
-- Add integration tests for full diagnostic flow
-- Validate formula matching accuracy (≥85%)
-- Consider web interface (Phase 7)
+- Phase 4: LM Studio integration for question generation and severity-based formula selection (e.g. exact 承气汤 member)
+- Phase 7: Web interface (optional)
+- Expand the synonym/vocabulary bridge for patient↔formula terms (currently relies on ClinicalSign + bigrams)
