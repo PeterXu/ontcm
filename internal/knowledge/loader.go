@@ -138,31 +138,41 @@ func (l *Loader) loadFormulaFile(filePath string, meridian models.MeridianType) 
 		Meridian: meridian,
 	}
 
-	// Extract formula name from title or first section
-	if section := doc.GetSection("麻黄汤药证详解"); section != nil {
-		// Extract name from section title pattern
-		formula.Name = strings.TrimSuffix(section.Title, "药证详解")
+	// Extract formula name from document title (first section)
+	// The first section title is like "麻黄汤药证详解" -> extract "麻黄汤"
+	if len(doc.SectionOrder) > 0 {
+		firstSectionTitle := doc.SectionOrder[0]
+		if strings.Contains(firstSectionTitle, "药证详解") {
+			formula.Name = strings.TrimSuffix(firstSectionTitle, "药证详解")
+		} else {
+			// If pattern doesn't match, use formulaID converted to Chinese
+			// e.g., "mahuang_tang" -> "麻黄汤"
+			formula.Name = formulaIDToChinese(formulaID)
+		}
 	}
 
 	// Extract composition table (方剂组成)
-	compositionSection := doc.GetSection("方剂组成")
-	if compositionSection != nil && len(compositionSection.Tables) > 0 {
-		table := compositionSection.Tables[0]
-		extractor := markdown.NewTableExtractor(table)
-		doses, err := extractor.ExtractFormula()
-		if err == nil {
-			// Convert to models.HerbDose
-			for _, dose := range doses {
-				herbDose := models.HerbDose{
-					Name:         dose.Name,
-					DoseOriginal: dose.DoseOriginal,
-					DoseGrams:    dose.DoseGrams,
-					Processing:   dose.Processing,
-					Effect:       dose.Effect,
-					Meridians:    dose.Meridians,
+	// Section titles have prefix like "二、" so we need substring matching
+	for sectionTitle, section := range doc.Sections {
+		if strings.Contains(sectionTitle, "方剂组成") && len(section.Tables) > 0 {
+			table := section.Tables[0]
+			extractor := markdown.NewTableExtractor(table)
+			doses, err := extractor.ExtractFormula()
+			if err == nil {
+				// Convert to models.HerbDose
+				for _, dose := range doses {
+					herbDose := models.HerbDose{
+						Name:         dose.Name,
+						DoseOriginal: dose.DoseOriginal,
+						DoseGrams:    dose.DoseGrams,
+						Processing:   dose.Processing,
+						Effect:       dose.Effect,
+						Meridians:    dose.Meridians,
+					}
+					formula.Composition = append(formula.Composition, herbDose)
 				}
-				formula.Composition = append(formula.Composition, herbDose)
 			}
+			break // Only use first matching table
 		}
 	}
 
@@ -227,14 +237,17 @@ func (l *Loader) loadFormulaFile(filePath string, meridian models.MeridianType) 
 	}
 
 	// Extract preparation instructions (煮服法)
-	if compositionSection != nil {
-		for _, content := range compositionSection.Content {
+	for _, section := range doc.Sections {
+		for _, content := range section.Content {
 			if strings.HasPrefix(content, "**煮服法**") ||
-			   strings.Contains(content, "煮取") ||
-			   strings.Contains(content, "水煎服") {
+				strings.Contains(content, "煮取") ||
+				strings.Contains(content, "水煎服") {
 				formula.Preparation = content
 				break
 			}
+		}
+		if formula.Preparation != "" {
+			break
 		}
 	}
 
@@ -630,4 +643,69 @@ type LoadStats struct {
 	FormulaCount int
 	HerbCount    int
 	ErrorCount   int
+}
+
+// formulaIDToChinese converts formula ID to Chinese name
+// This is a simplified mapping - the proper solution would be to read from a mapping table
+func formulaIDToChinese(formulaID string) string {
+	// Common formula name mappings (partial list)
+	mappings := map[string]string{
+		"mahuang_tang":          "麻黄汤",
+		"guizhi_tang":           "桂枝汤",
+		"xiao_qinglong_tang":    "小青龙汤",
+		"da_qinglong_tang":      "大青龙汤",
+		"dachengqi_tang":        "大承气汤",
+		"xiao_chengqi_tang":     "小承气汤",
+		"tiaochengqi_tang":      "调胃承气汤",
+		"xiao_chaihu_tang":      "小柴胡汤",
+		"dchaihu_tang":          "大柴胡汤",
+		"sini_tang":             "四逆汤",
+		"sini_jia_renshen_tang": "四逆加人参汤",
+		"lizhong_tang":          "理中汤",
+		"wuling_tang":           "五苓散",
+		"zhuling_tang":          "猪苓汤",
+		"baihu_tang":            "白虎汤",
+		"baihu_jia_renshen_tang": "白虎加人参汤",
+		"fuzi_tang":             "附子汤",
+		"zhengwu_tang":          "真武汤",
+		"wuji_powder":           "乌梅丸",
+		"danggui_sini_tang":     "当归四逆汤",
+		"huangqin_tang":         "黄芩汤",
+		"huangqin_jia_zhangan_tang": "黄芩加半夏生姜汤",
+		"gegen_tang":            "葛根汤",
+		"gegen_jia_banxia_tang": "葛根加半夏汤",
+		"guizhi_mahuang_geban_tang": "桂枝麻黄各半汤",
+		"guizhi_er_mahuang_yi_tang": "桂枝二麻黄一汤",
+		"guizhi_er_yuebi_yi_tang": "桂枝二越婢一汤",
+		"yuebi_tang":            "越婢汤",
+		"yuebi_jia_banxia_tang": "越婢加半夏汤",
+		"mahuang_xixin_fuzi_tang": "麻黄细辛附子汤",
+		"mahuang_shengma_tang":  "麻黄升麻汤",
+		"mahuang_lianyao_chixiaodou_tang": "麻黄连轺赤小豆汤",
+		"banxia_xie_xin_tang":   "半夏泻心汤",
+		"dabanxia_xie_xin_tang": "大半夏泻心汤",
+		"gancao_xie_xin_tang":   "甘草泻心汤",
+		"fuzi_xie_xin_tang":     "附子泻心汤",
+		"shengjiang_xie_xin_tang": "生姜泻心汤",
+		"houpo_jiangban_xiaorenshen_tang": "厚朴姜半夏人参汤",
+		"gancao_ganjiang_tang":  "甘草干姜汤",
+		"gancao_fuzi_tang":      "甘草附子汤",
+		"shaojiang_fuzi_tang":   "芍药附子汤",
+		"wuling_powder":         "五苓散",
+		"wenling_tang":          "文蛤汤",
+		"zhuling_powder":        "猪苓汤",
+		"zhishi_xie_xin_tang":   "枳实泻心汤",
+		"huanglian_xie_xin_tang": "黄连泻心汤",
+		"shengjiang_banxia_tang": "生姜半夏汤",
+		"gancao_mahuang_tang":   "甘草麻黄汤",
+	}
+
+	// Check if we have a mapping
+	if name, ok := mappings[formulaID]; ok {
+		return name
+	}
+
+	// Fallback: try to extract from formula ID by removing underscores and common suffixes
+	// This won't work well for most formulas, so we should expand the mapping table
+	return formulaID
 }

@@ -17,50 +17,50 @@ const (
 
 // Formula represents a single formula from Shanghanlun
 type Formula struct {
-	ID               string            // Unique identifier (e.g., "mahuang_tang")
-	Name             string            // Chinese name (e.g., "麻黄汤")
-	NamePinyin       string            // Pinyin transliteration (optional)
-	Meridian         MeridianType      // Six Meridians classification
-	Composition      []HerbDose        // List of herbs with dosage
-	OriginalText     string            // Shanghanlun original text quote
-	KeySymptoms      []FormulaSymptom  // Core symptoms this formula treats
-	OptionalSymptoms []string          // May-have symptoms
-	PulsePatterns    []string          // Expected pulse patterns (e.g., "浮紧", "浮缓")
-	TongueSigns      []string          // Expected tongue signs
-	DrugSyndromes    []DrugSyndrome    // Drug-syndrome verification rules per herb
-	Contraindications []Contraindication // When NOT to use
-	Variants         []string          // Related formula IDs
-	Preparation      string            // Brewing instructions (煮服法)
-	DosageAdjustments map[string]string // Adjustments by patient type (optional)
-	MatchScore       float64           // Match score for current diagnosis (0-1)
+	ID               string            `json:"id"`                       // Unique identifier (e.g., "mahuang_tang")
+	Name             string            `json:"name"`                     // Chinese name (e.g., "麻黄汤")
+	NamePinyin       string            `json:"name_pinyin,omitempty"`    // Pinyin transliteration (optional)
+	Meridian         MeridianType      `json:"meridian"`                 // Six Meridians classification
+	Composition      []HerbDose        `json:"composition"`              // List of herbs with dosage
+	OriginalText     string            `json:"original_text,omitempty"`  // Shanghanlun original text quote
+	KeySymptoms      []FormulaSymptom  `json:"key_symptoms"`             // Core symptoms this formula treats
+	OptionalSymptoms []string          `json:"optional_symptoms,omitempty"` // May-have symptoms
+	PulsePatterns    []string          `json:"pulse_patterns,omitempty"` // Expected pulse patterns (e.g., "浮紧", "浮缓")
+	TongueSigns      []string          `json:"tongue_signs,omitempty"`   // Expected tongue signs
+	DrugSyndromes    []DrugSyndrome    `json:"drug_syndromes"`           // Drug-syndrome verification rules per herb
+	Contraindications []Contraindication `json:"contraindications,omitempty"` // When NOT to use
+	Variants         []string          `json:"variants,omitempty"`       // Related formula IDs
+	Preparation      string            `json:"preparation,omitempty"`    // Brewing instructions (煮服法)
+	DosageAdjustments map[string]string `json:"dosage_adjustments,omitempty"` // Adjustments by patient type (optional)
+	MatchScore       float64           `json:"match_score,omitempty"`    // Match score for current diagnosis (0-1)
 }
 
 // HerbDose represents a herb with its dosage in a formula
 type HerbDose struct {
-	HerbID        string  // Herb identifier (maps to Herb model)
-	Name          string  // Herb name (e.g., "麻黄")
-	DoseOriginal  string  // Original dose from Shanghanlun (e.g., "二两")
-	DoseGrams     float64 // Modern gram equivalent (approximate)
-	Processing    string  // Preparation method (去皮, 去节, 炒, etc.)
-	Effect        string  // Effect in this formula
-	Meridians     string  // Meridians this herb enters
+	HerbID        string  `json:"herb_id,omitempty"`        // Herb identifier (maps to Herb model)
+	Name          string  `json:"name"`                     // Herb name (e.g., "麻黄")
+	DoseOriginal  string  `json:"dose_original"`            // Original dose from Shanghanlun (e.g., "二两")
+	DoseGrams     float64 `json:"dose_grams,omitempty"`     // Modern gram equivalent (approximate)
+	Processing    string  `json:"processing,omitempty"`     // Preparation method (去皮, 去节, 炒, etc.)
+	Effect        string  `json:"effect,omitempty"`         // Effect in this formula
+	Meridians     string  `json:"meridians,omitempty"`      // Meridians this herb enters
 }
 
 // FormulaSymptom represents a key symptom for formula matching
 type FormulaSymptom struct {
-	Name         string // Symptom name (e.g., "恶寒", "无汗")
-	ClinicalSign string // Clinical manifestation
-	Reason       string // Medical reasoning
-	Required     bool   // Whether this symptom is mandatory for diagnosis
+	Name         string `json:"name"`          // Symptom name (e.g., "恶寒", "无汗")
+	ClinicalSign string `json:"clinical_sign"` // Clinical manifestation
+	Reason       string `json:"reason"`        // Medical reasoning
+	Required     bool   `json:"required"`      // Whether this symptom is mandatory for diagnosis
 }
 
 // DrugSyndrome represents drug-syndrome matching (药证)
 type DrugSyndrome struct {
-	HerbName      string // Herb name
-	Effect        string // Herb effect
-	TargetSymptom string // Symptom this herb treats
-	Verification  string // How to verify this herb is needed
-	Present       bool   // Whether this symptom is present in current diagnosis
+	HerbName      string `json:"herb_name"`       // Herb name
+	Effect        string `json:"effect"`          // Herb effect
+	TargetSymptom string `json:"target_symptom"`  // Symptom this herb treats
+	Verification  string `json:"verification"`    // How to verify this herb is needed
+	Present       bool   `json:"present"`         // Whether this symptom is present in current diagnosis
 }
 
 // Contraindication represents when a formula should NOT be used
@@ -135,4 +135,9 @@ func (f *Formula) CalculateMatchScore(symptoms []string) float64 {
 func ContainsSymptom(description string, keyword string) bool {
 	// Simple keyword matching (can be improved with fuzzy matching)
 	return strings.Contains(description, keyword)
+}
+
+// String returns the string representation of MeridianType
+func (m MeridianType) String() string {
+	return string(m)
 }

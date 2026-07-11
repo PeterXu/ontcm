@@ -117,3 +117,17 @@ func (h *Herb) CanUseForElderly() (bool, string) {
 	}
 	return true, ""
 }
+
+// String returns the string representation of TierType
+func (t TierType) String() string {
+	switch t {
+	case Tier1:
+		return "必进15味"
+	case Tier2:
+		return "补充29味"
+	case Tier3:
+		return "按需10味"
+	default:
+		return "未知"
+	}
+}
