@@ -33,12 +33,14 @@ func TestLoadAll(t *testing.T) {
 	t.Logf("Loaded %d formulas, %d herbs, %d errors",
 		stats.FormulaCount, stats.HerbCount, stats.ErrorCount)
 
-	// Verify formulas loaded correctly. 111 formula .md files → 111 unique
-	// formula IDs. (index.md files are skipped as navigation; the former
-	// 桂枝加大黄汤 duplicate across taiyin/ + other/ was consolidated into
-	// taiyin/, its canonical 太阴 dir per 原文 279条: "属太阴也".)
-	if stats.FormulaCount != 111 {
-		t.Errorf("Expected 111 formulas, got %d", stats.FormulaCount)
+	// Verify formulas loaded correctly. 108 formula .md files → 108 unique
+	// formula IDs. (index.md files are skipped as navigation. Three former
+	// filename-spelling duplicates were consolidated — 桂枝加芍药汤 shaoyao/
+	// shao_yao, 半夏散及汤 san_ji/san, 茯苓桂枝甘草大枣汤 gancao/ganzao — each
+	// keeping the canonical spelling. Plus 桂枝加大黄汤, earlier consolidated
+	// across taiyin/+other/.)
+	if stats.FormulaCount != 108 {
+		t.Errorf("Expected 108 formulas, got %d", stats.FormulaCount)
 	}
 
 	// Verify herbs loaded correctly
@@ -211,6 +213,66 @@ func TestGuizhiJiaDahuangConsolidated(t *testing.T) {
 	}
 	if !hasDaBianNan {
 		t.Error("KeySymptoms missing 大便难 (full-doc-only symptom; stub had only 大实痛)")
+	}
+}
+
+// TestFilenameDuplicateConsolidation: three formulas were each duplicated
+// under two different filename spellings (→ two loader IDs, inflating the
+// unique count). Each pair was consolidated to the canonical spelling; the
+// duplicate IDs must no longer load, and the keepers must carry full content.
+//
+//	桂枝加芍药汤         guizhi_jia_shaoyao_tang  (taiyin, kept)  vs guizhi_jia_shao_yao_tang   (other, deleted)
+//	半夏散及汤           banxia_san_ji_tang       (shaoyin, kept) vs banxia_san_tang           (shaoyin, deleted)
+//	茯苓桂枝甘草大枣汤   linggui_gancao_dazao_tang (taiyang, kept) vs linggui_ganzao_dazao_tang (taiyang, deleted, typo)
+//
+// 桂枝加芍药汤's keeper is also reclassified 其他→太阴 (it had been in other/).
+func TestFilenameDuplicateConsolidation(t *testing.T) {
+	skipShort(t)
+	loader := NewLoader("../../docs")
+	if err := loader.LoadAll(); err != nil {
+		t.Fatalf("LoadAll: %v", err)
+	}
+
+	// Deleted (duplicate-spelling) IDs must be gone.
+	for _, id := range []string{"guizhi_jia_shao_yao_tang", "banxia_san_tang", "linggui_ganzao_dazao_tang"} {
+		if f := loader.GetFormula(id); f != nil {
+			t.Errorf("duplicate ID %q still loaded (should be deleted): %+v", id, f)
+		}
+	}
+
+	// Keepers must carry full content, not the stub.
+	keepers := []struct {
+		id           string
+		meridian     models.MeridianType
+		wantKeySymps int
+		wantContains string // a full-doc-only 方证要点 name
+	}{
+		{"guizhi_jia_shaoyao_tang", models.MeridianTaiyin, 3, "无表证"},
+		{"banxia_san_ji_tang", models.MeridianShaoyin, 4, "舌淡"},
+		{"linggui_gancao_dazao_tang", models.MeridianTaiyang, 3, "发汗后"},
+	}
+	for _, k := range keepers {
+		f := loader.GetFormula(k.id)
+		if f == nil {
+			t.Errorf("keeper %q not loaded", k.id)
+			continue
+		}
+		if f.Meridian != k.meridian {
+			t.Errorf("%s Meridian: got %v, want %v", k.id, f.Meridian, k.meridian)
+		}
+		if len(f.KeySymptoms) != k.wantKeySymps {
+			t.Errorf("%s KeySymptoms: got %d, want %d (full doc, not stub)", k.id, len(f.KeySymptoms), k.wantKeySymps)
+		}
+		found := false
+		for _, s := range f.KeySymptoms {
+			if strings.Contains(s.Name, k.wantContains) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("%s KeySymptoms missing %q (full-doc-only symptom)", k.id, k.wantContains)
+		}
 	}
 }
 

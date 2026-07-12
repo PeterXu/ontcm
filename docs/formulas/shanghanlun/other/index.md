@@ -65,7 +65,6 @@
 | 方剂 | 方证要点 | 链接 |
 |------|---------|------|
 | **旋覆代赭汤** | 心下痞硬+噫气不除 | [详解](xuanfu_daihe_tang.md) |
-| **桂枝加芍药汤** | 太阴腹满时痛 | [详解](guizhi_jia_shao_yao_tang.md) |
 | **桂枝去桂加茯苓白术汤** | 心下满微痛+小便不利 | [详解](guizhi_qu_guizhi_jia_fuling_baizhu_tang.md) |
 | **桂枝加龙骨牡蛎汤** | 虚劳失精 | [详解](guizhi_jia_longgu_muli_tang.md) |
 | **桂枝茯苓丸** | 妇人癥病 | [详解](guizhi_fuling_wan.md) |
