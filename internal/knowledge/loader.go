@@ -516,45 +516,69 @@ func parseLeadingInt(s string) int {
 	return n
 }
 
-// parseMeridians converts meridian string to MeridianType array
+// organToMeridian maps a zang-fu organ token to its 六经 (Six Meridians)
+// classification, following the standard 伤寒论 hand/foot-meridian pairings:
+//   太阳 = 膀胱, 小肠      阳明 = 胃, 大肠      少阳 = 胆, 三焦
+//   太阴 = 脾, 肺          少阴 = 肾, 心        厥阴 = 肝, 心包
+// Organ tokens are written in length-descending order so the scan below does
+// longest-match (心包 beats 心; 大肠 beats a stray 肠).
+var organToMeridian = []struct {
+	token string
+	mer   models.MeridianType
+}{
+	// 2-char organs first
+	{"心包", models.MeridianJueyin},
+	{"三焦", models.MeridianShaoyang},
+	{"大肠", models.MeridianYangming},
+	{"小肠", models.MeridianTaiyang},
+	{"膀胱", models.MeridianTaiyang},
+	// 1-char organs
+	{"胃", models.MeridianYangming},
+	{"胆", models.MeridianShaoyang},
+	{"脾", models.MeridianTaiyin},
+	{"肺", models.MeridianTaiyin},
+	{"肾", models.MeridianShaoyin},
+	{"心", models.MeridianShaoyin},
+	{"肝", models.MeridianJueyin},
+}
+
+// parseMeridians converts a 归经 cell to a MeridianType array. 归经 cells
+// concatenate organ names with NO delimiter (e.g. 桂枝 "心肺膀胱", 大黄 "脾胃大肠"),
+// so we scan the string rune-by-rune and longest-match organ tokens, skipping
+// any non-organ chars (delimiters like 、，, as well as wrapper chars like
+// 经/手/足). Duplicate meridians (e.g. 心肾 both → 少阴) collapse, preserving
+// first-seen order.
 func parseMeridians(meridiansText string) []models.MeridianType {
-	// Split by common delimiters: 、，,
-	delimeters := []string{",", "，", "、", "；", ";", "和", "与"}
+	runes := []rune(meridiansText)
+	var meridians []models.MeridianType
+	seen := map[models.MeridianType]bool{}
 
-	var parts []string
-	text := meridiansText
-
-	for _, delim := range delimeters {
-		if strings.Contains(text, delim) {
-			parts = strings.Split(text, delim)
-			break
+	for i := 0; i < len(runes); {
+		matched := false
+		for _, om := range organToMeridian {
+			tokRunes := []rune(om.token)
+			if i+len(tokRunes) > len(runes) {
+				continue
+			}
+			equal := true
+			for j, r := range tokRunes {
+				if runes[i+j] != r {
+					equal = false
+					break
+				}
+			}
+			if equal {
+				if !seen[om.mer] {
+					seen[om.mer] = true
+					meridians = append(meridians, om.mer)
+				}
+				i += len(tokRunes)
+				matched = true
+				break
+			}
 		}
-	}
-
-	if len(parts) == 0 {
-		// No delimiter found, treat as single meridian
-		parts = []string{text}
-	}
-
-	meridians := []models.MeridianType{}
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		// Map organ names to meridian types
-		switch part {
-		case "肺", "肺经":
-			meridians = append(meridians, models.MeridianTaiyang)
-		case "心", "心经":
-			meridians = append(meridians, models.MeridianShaoyin)
-		case "脾", "胃", "脾胃":
-			meridians = append(meridians, models.MeridianTaiyin)
-		case "肾", "膀胱", "肾膀胱":
-			meridians = append(meridians, models.MeridianShaoyin)
-		case "肝", "胆", "肝胆":
-			meridians = append(meridians, models.MeridianShaoyang)
-		case "大肠", "小肠":
-			meridians = append(meridians, models.MeridianYangming)
-		default:
-			// Keep as string for now
+		if !matched {
+			i++ // skip delimiter / wrapper char
 		}
 	}
 

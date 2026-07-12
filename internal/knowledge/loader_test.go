@@ -4,6 +4,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"ontcm/internal/knowledge/models"
 )
 
 func TestLoadAll(t *testing.T) {
@@ -196,4 +198,75 @@ func TestHerbOverviewColumnsAligned(t *testing.T) {
 	if gz.Frequency != 70 {
 		t.Errorf("桂枝 Frequency: got %d, want 70", gz.Frequency)
 	}
+
+	// 归经 cell is "心肺膀胱" (no delimiter). parseMeridians must split it into
+	// organ tokens and map each to its 六经, so MainMeridians is non-empty and
+	// includes 太阳 (膀胱). Regression for the concatenated-organ bug.
+	if !containsMeridian(gz.MainMeridians, models.MeridianTaiyang) {
+		t.Errorf("桂枝 MainMeridians missing 太阳 (膀胱): got %v", gz.MainMeridians)
+	}
+	if len(gz.MainMeridians) == 0 {
+		t.Errorf("桂枝 MainMeridians empty (concatenated 归经 not tokenized): 归经=%q", "心肺膀胱")
+	}
+}
+
+// TestParseMeridians: 归经 cells concatenate organ names with NO delimiter
+// (e.g. 桂枝 "心肺膀胱", 大黄 "脾胃大肠"). parseMeridians must split them by
+// substring matching rather than require explicit delimiters, do longest-match
+// so "心包" is one token (厥阴), and map every organ to its correct 六经.
+// Regression for MainMeridians being empty for most herbs.
+func TestParseMeridians(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want []models.MeridianType
+	}{
+		{"empty", "", nil},
+		{"single organ 肝→厥阴", "肝", []models.MeridianType{models.MeridianJueyin}},
+		{"longest-match 心包→厥阴 (not split into 心+包)", "心包", []models.MeridianType{models.MeridianJueyin}},
+		{"concatenated 桂枝 心肺膀胱", "心肺膀胱", []models.MeridianType{
+			models.MeridianShaoyin, models.MeridianTaiyin, models.MeridianTaiyang,
+		}},
+		{"concatenated 大黄 脾胃大肠 (dedup 阳明)", "脾胃大肠", []models.MeridianType{
+			models.MeridianTaiyin, models.MeridianYangming,
+		}},
+		{"concatenated 麻黄 肺膀胱", "肺膀胱", []models.MeridianType{
+			models.MeridianTaiyin, models.MeridianTaiyang,
+		}},
+		{"delimited still works 肺、膀胱", "肺、膀胱", []models.MeridianType{
+			models.MeridianTaiyin, models.MeridianTaiyang,
+		}},
+		{"wrapped 足少阳胆经 skips wrapper chars", "足少阳胆经", []models.MeridianType{
+			models.MeridianShaoyang,
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := parseMeridians(c.in)
+			if !equalMeridians(got, c.want) {
+				t.Errorf("parseMeridians(%q) = %v, want %v", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+func containsMeridian(ms []models.MeridianType, want models.MeridianType) bool {
+	for _, m := range ms {
+		if m == want {
+			return true
+		}
+	}
+	return false
+}
+
+func equalMeridians(a, b []models.MeridianType) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

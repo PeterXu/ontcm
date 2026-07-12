@@ -170,10 +170,10 @@ GET    /api/v1/health                   - Health check
 - **Herb overview columns mis-aligned** (桂枝 `Nature: "70"`, `Effect: ["心肺膀胱"]`): `loadHerbOverviewFile` read fixed positions, but tier1's table has an extra `出现次数` column tier2/3 lack → every field shifted left. Fixed: header-driven extraction (`herbColIndex`/`herbCell`) resolves columns by name; also populates `Frequency` and splits `核心药证` into `Effect`.
 - **`index.md` loaded as a fake formula** (`{ID:index}`): `loadFormulas` now skips `index.md`. True unique-formula count is **111** (the prior 112 was inflated by the spurious index entry). `TestLoadAll` and the `/api` stats updated accordingly (stats are now dynamic from `loader.Stats()`).
 - Regression tests: `pkg/markdown` H1 capture; `internal/knowledge` formula names, no-index, herb-column alignment.
+- **`parseMeridians` left `MainMeridians` empty for all herbs**: `归经` cells concatenate organ names with no delimiter (`心肺膀胱`, `脾胃大肠`), but the old code only split on explicit delimiters → one unmatched part → empty. The organ→六经 table was also wrong (肺→太阳, 膀胱→少阴, 小肠→阳明, 肝→少阳). Fixed: longest-match token scan over a corrected table (太阳=膀胱,小肠; 阳明=胃,大肠; 少阳=胆,三焦; 太阴=脾,肺; 少阴=肾,心; 厥阴=肝,心包), dedup preserving order. All 54 herbs now have non-empty `MainMeridians` (桂枝→少阴,太阴,太阳). Regression test: `TestParseMeridians`.
 
 ## Next Steps
 All 8 phases are complete. Candidate follow-ups (data quality / enhancement):
 - **Duplicate formula doc**: `guizhi_jia_dahuang_tang.md` exists in both `taiyin/` (34-line stub) and `other/` (85-line full); one is a docs-curation call (delete the stub, or move to `taiyang/`). Until resolved the loader keeps the `other/` version (last by dir order).
-- **`parseMeridians` ignores concatenated organs**: `归经` cells like `心肺膀胱` / `脾胃大肠` have no delimiter, so `MainMeridians` ends up empty for many herbs. Needs substring-based organ matching. (Herb detail UI hides the empty 归经 line.)
 - Expand the synonym/vocabulary bridge for patient↔formula terms (currently relies on ClinicalSign + bigrams).
 - Optional: dynamic question generation / free-text symptom intake via the LLM client (Phase 4 future use cases).
