@@ -3,6 +3,7 @@ package web
 import (
 	"fmt"
 	"log"
+	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -13,6 +14,7 @@ import (
 	"ontcm/internal/web/handlers"
 	"ontcm/internal/web/middleware"
 	"ontcm/internal/web/session"
+	"ontcm/internal/web/ui"
 )
 
 // Server represents the HTTP server
@@ -148,8 +150,13 @@ func setupRoutes(router *gin.Engine, formulaHandler *handlers.FormulaHandler, he
 		herbs.GET("/:id", herbHandler.Get)                       // Get specific herb
 	}
 
-	// Root endpoint - API info
-	router.GET("/", func(c *gin.Context) {
+	// Browser UI — the embedded SPA is served at the root, with its assets
+	// under /static. The JSON API lives under /api/v1; /api returns API info.
+	router.GET("/", gin.WrapH(ui.IndexHandler()))
+	router.StaticFS("/static", http.FS(ui.FS()))
+
+	// API info (served off "/api" so the root can host the UI)
+	router.GET("/api", func(c *gin.Context) {
 		c.JSON(200, gin.H{
 			"name":    "OntCM API",
 			"version": "1.0.0",

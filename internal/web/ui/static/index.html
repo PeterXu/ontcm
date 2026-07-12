@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ONTCM · 六经辨证智能诊疗</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">医</span>
+      <div class="brand-text">
+        <h1>ONTCM</h1>
+        <p>六经辨证智能诊疗助手</p>
+      </div>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-view="diagnostic" role="tab">辨证</button>
+      <button class="tab" data-view="formulas" role="tab">方剂</button>
+      <button class="tab" data-view="herbs" role="tab">中药</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- 辨证 (diagnostic wizard) -->
+    <section id="view-diagnostic" class="view active">
+      <div id="stepper" class="stepper" hidden></div>
+      <div id="diag-stage" class="diag-stage"><!-- rendered by diagnostic.js --></div>
+    </section>
+
+    <!-- 方剂 (formula lookup) -->
+    <section id="view-formulas" class="view">
+      <div class="lookup" data-kind="formula">
+        <div class="lookup-controls">
+          <input
+            type="search"
+            class="lookup-search"
+            data-role="search"
+            placeholder="按方剂名或症状筛选，如 理中、桂枝汤、便秘"
+          />
+          <button class="btn" data-role="search-btn">搜索</button>
+          <button class="btn btn-ghost" data-role="list-btn">全部方剂</button>
+        </div>
+        <p class="lookup-hint" data-role="hint"></p>
+        <div class="lookup-grid">
+          <div class="lookup-list" data-role="list"></div>
+          <div class="lookup-detail" data-role="detail">
+            <p class="muted">在左侧选择或搜索以查看详情。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 中药 (herb lookup) -->
+    <section id="view-herbs" class="view">
+      <div class="lookup" data-kind="herb">
+        <div class="lookup-controls">
+          <input
+            type="search"
+            class="lookup-search"
+            data-role="search"
+            placeholder="按药名筛选，如 桂枝、麻黄"
+          />
+          <button class="btn" data-role="search-btn">搜索</button>
+          <button class="btn btn-ghost" data-role="list-btn">全部中药</button>
+        </div>
+        <p class="lookup-hint" data-role="hint"></p>
+        <div class="lookup-grid">
+          <div class="lookup-list" data-role="list"></div>
+          <div class="lookup-detail" data-role="detail">
+            <p class="muted">在左侧选择或搜索以查看详情。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>基于《伤寒论》· 仅供学习与研究</span>
+  </footer>
+
+  <script type="module" src="/static/js/app.js"></script>
+</body>
+</html>
