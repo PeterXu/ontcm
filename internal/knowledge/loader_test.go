@@ -276,6 +276,26 @@ func TestFilenameDuplicateConsolidation(t *testing.T) {
 	}
 }
 
+// TestFormulaOriginalTextLoaded: 原文 sections are titled "一、《伤寒论》原文",
+// but the loader used GetSection("《伤寒论》原文") — an exact map lookup that
+// missed the "一、" prefix, leaving OriginalText empty for EVERY formula. The
+// loader must now match by substring (like its other section lookups).
+func TestFormulaOriginalTextLoaded(t *testing.T) {
+	skipShort(t)
+	loader := NewLoader("../../docs")
+	if err := loader.LoadAll(); err != nil {
+		t.Fatalf("LoadAll: %v", err)
+	}
+	f := loader.GetFormula("guizhi_jia_dahuang_tang")
+	if f == nil {
+		t.Fatal("guizhi_jia_dahuang_tang not loaded")
+	}
+	// 279条 quote contains "属太阴也" — proves the 原文 section was found.
+	if !strings.Contains(f.OriginalText, "属太阴") {
+		t.Errorf("OriginalText missing 属太阴 (原文 279条); got %q", f.OriginalText)
+	}
+}
+
 // TestHerbOverviewColumnsAligned: tier1's overview table has an extra 出现次数
 // column vs tier2/3; extraction must be header-driven so columns land in the
 // right fields. Regression for 桂枝 loading Nature="70", Effect=["心肺膀胱"].

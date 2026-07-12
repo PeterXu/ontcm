@@ -15,30 +15,42 @@ func NewTableExtractor(table *Table) *TableExtractor {
 	return &TableExtractor{Table: table}
 }
 
-// ExtractFormula extracts formula composition from a table
-// Expected format: | 药味 | 剂量（原方） | 功效 | 归经 |
+// ExtractFormula extracts formula composition from a table.
+//
+// Header-driven: it resolves the 药味 / 用量|剂量 / 功效 / 归经 columns by name
+// rather than by fixed position, so it handles the docs' table variants — the
+// 4-col 药味|剂量（原方）|功效|归经, the 3-col 药味|用量|功效 (桂枝加 family),
+// and the 2-col 药味|功效. 药味 and 功效 are required; the dose and 归经 columns
+// are optional (absent → empty). Previously a 4-col + exact-header gate left
+// ~49 formulas with empty Composition.
 func (e *TableExtractor) ExtractFormula() ([]HerbDose, error) {
-	if e.Table == nil || len(e.Table.Headers) < 4 {
+	if e.Table == nil {
 		return nil, fmt.Errorf("invalid table format for formula extraction")
 	}
-
-	// Verify headers match expected format
-	expectedHeaders := []string{"药味", "剂量", "功效", "归经"}
-	if !e.matchHeaders(expectedHeaders) {
+	nameCol := e.colIndex("药味")
+	effectCol := e.colIndex("功效")
+	if nameCol < 0 || effectCol < 0 {
 		return nil, fmt.Errorf("table headers do not match expected formula format")
 	}
+	doseCol := e.colIndexAny("用量", "剂量")
+	meridianCol := e.colIndex("归经")
 
 	var doses []HerbDose
 	for _, row := range e.Table.Rows {
-		if len(row) < 4 {
-			continue // Skip malformed rows
+		name := strings.TrimSpace(cellAt(row, nameCol))
+		if name == "" {
+			continue // Skip empty rows
 		}
-
+		// Skip a repeated header row (e.g. from a merged sub-table in an
+		// aggregate doc like 承气汤类) — "药味" is a column header, not a herb.
+		if nameCol < len(e.Table.Headers) && name == strings.TrimSpace(e.Table.Headers[nameCol]) {
+			continue
+		}
 		dose := HerbDose{
-			Name:         strings.TrimSpace(row[0]),
-			DoseOriginal: strings.TrimSpace(row[1]),
-			Effect:       strings.TrimSpace(row[2]),
-			Meridians:    strings.TrimSpace(row[3]),
+			Name:         name,
+			DoseOriginal: strings.TrimSpace(cellAt(row, doseCol)),
+			Effect:       strings.TrimSpace(cellAt(row, effectCol)),
+			Meridians:    strings.TrimSpace(cellAt(row, meridianCol)),
 		}
 
 		// Parse processing information from dose (去皮, 去节, etc.)
@@ -51,6 +63,43 @@ func (e *TableExtractor) ExtractFormula() ([]HerbDose, error) {
 	}
 
 	return doses, nil
+}
+
+// colIndex returns the index of the first header containing substr, or -1.
+func (e *TableExtractor) colIndex(substr string) int {
+	if e.Table == nil {
+		return -1
+	}
+	for i, h := range e.Table.Headers {
+		if strings.Contains(h, substr) {
+			return i
+		}
+	}
+	return -1
+}
+
+// colIndexAny returns the index of the first header containing any of substrs,
+// or -1. The dose column is named 用量 in some docs and 剂量（原方） in others.
+func (e *TableExtractor) colIndexAny(substrs ...string) int {
+	if e.Table == nil {
+		return -1
+	}
+	for i, h := range e.Table.Headers {
+		for _, s := range substrs {
+			if strings.Contains(h, s) {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// cellAt returns row[i], or "" if i is out of range (column absent / short row).
+func cellAt(row []string, i int) string {
+	if i < 0 || i >= len(row) {
+		return ""
+	}
+	return row[i]
 }
 
 // ExtractDrugSyndrome extracts drug-syndrome matching from a table
@@ -153,23 +202,6 @@ func (e *TableExtractor) ExtractHerbInfo(herbName string) ([]HerbDrugSyndrome, e
 	}
 
 	return syndromes, nil
-}
-
-// matchHeaders checks if table headers match expected headers (partial match allowed)
-func (e *TableExtractor) matchHeaders(expected []string) bool {
-	for _, expectedHeader := range expected {
-		found := false
-		for _, actualHeader := range e.Table.Headers {
-			if strings.Contains(actualHeader, expectedHeader) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return false
-		}
-	}
-	return true
 }
 
 // extractProcessing extracts processing instructions from dose text

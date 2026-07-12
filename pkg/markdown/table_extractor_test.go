@@ -40,6 +40,99 @@ func TestExtractFormula(t *testing.T) {
 	}
 }
 
+func TestExtractFormulaThreeColumn(t *testing.T) {
+	// The 桂枝加 family uses a 3-col 药味|用量|功效 table (no 归经). ExtractFormula
+	// must still extract composition with Name/DoseOriginal/Effect; Meridians
+	// empty. Regression for the 4-col-only header check that left ~49 formulas
+	// with empty Composition.
+	table := &Table{
+		Headers: []string{"药味", "用量", "功效"},
+		Rows: [][]string{
+			{"桂枝", "三两", "温通经脉"},
+			{"芍药", "六两", "缓急止痛"},
+			{"大黄", "二两", "泻下通便"},
+		},
+	}
+
+	extractor := NewTableExtractor(table)
+	doses, err := extractor.ExtractFormula()
+	if err != nil {
+		t.Fatalf("ExtractFormula 3-col failed: %v", err)
+	}
+	if len(doses) != 3 {
+		t.Fatalf("Expected 3 doses, got %d", len(doses))
+	}
+	if doses[0].Name != "桂枝" {
+		t.Errorf("Name: got %q, want 桂枝", doses[0].Name)
+	}
+	if doses[0].DoseOriginal != "三两" {
+		t.Errorf("DoseOriginal: got %q, want 三两", doses[0].DoseOriginal)
+	}
+	if doses[0].Effect != "温通经脉" {
+		t.Errorf("Effect: got %q, want 温通经脉", doses[0].Effect)
+	}
+	if doses[0].Meridians != "" {
+		t.Errorf("Meridians: got %q, want empty (no 归经 column)", doses[0].Meridians)
+	}
+	// DoseGrams is derived from the 用量 column (三两 → 9.0).
+	if doses[0].DoseGrams != 9.0 {
+		t.Errorf("DoseGrams: got %f, want 9.0", doses[0].DoseGrams)
+	}
+}
+
+func TestExtractFormulaTwoColumn(t *testing.T) {
+	// Some docs use a 2-col 药味|功效 table (no dose, no 归经). Must extract
+	// Name/Effect; DoseOriginal and Meridians empty.
+	table := &Table{
+		Headers: []string{"药味", "功效"},
+		Rows: [][]string{
+			{"茯苓", "利水宁心"},
+			{"桂枝", "温阳化气"},
+		},
+	}
+
+	extractor := NewTableExtractor(table)
+	doses, err := extractor.ExtractFormula()
+	if err != nil {
+		t.Fatalf("ExtractFormula 2-col failed: %v", err)
+	}
+	if len(doses) != 2 {
+		t.Fatalf("Expected 2 doses, got %d", len(doses))
+	}
+	if doses[0].Name != "茯苓" {
+		t.Errorf("Name: got %q, want 茯苓", doses[0].Name)
+	}
+	if doses[0].Effect != "利水宁心" {
+		t.Errorf("Effect: got %q, want 利水宁心", doses[0].Effect)
+	}
+	if doses[0].DoseOriginal != "" {
+		t.Errorf("DoseOriginal: got %q, want empty (no dose column)", doses[0].DoseOriginal)
+	}
+}
+
+func TestExtractFormulaSkipsRepeatedHeaderRow(t *testing.T) {
+	// Aggregate docs (e.g. 承气汤类) have a merged table whose Rows include a
+	// repeated header row from a sub-table. "药味" is a column header, not a
+	// herb — such rows must be skipped.
+	table := &Table{
+		Headers: []string{"药味", "用量", "功效"},
+		Rows: [][]string{
+			{"桂枝", "三两", "温通经脉"},
+			{"药味", "用量", "功效"},
+			{"芍药", "六两", "缓急止痛"},
+		},
+	}
+
+	extractor := NewTableExtractor(table)
+	doses, err := extractor.ExtractFormula()
+	if err != nil {
+		t.Fatalf("ExtractFormula failed: %v", err)
+	}
+	if len(doses) != 2 {
+		t.Fatalf("Expected 2 doses (repeated header row skipped), got %d", len(doses))
+	}
+}
+
 func TestExtractDrugSyndrome(t *testing.T) {
 	table := &Table{
 		Headers: []string{"功效", "对应症状", "校验要点"},

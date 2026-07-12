@@ -206,10 +206,14 @@ func (l *Loader) loadFormulaFile(filePath string, meridian models.MeridianType) 
 		}
 	}
 
-	// Extract original text (《伤寒论》原文)
-	originalSection := doc.GetSection("《伤寒论》原文")
-	if originalSection != nil && len(originalSection.Content) > 0 {
-		formula.OriginalText = strings.Join(originalSection.Content, "\n")
+	// Extract original text (《伤寒论》原文). Sections are titled "一、《伤寒论》原文"
+	// (with the 一、 prefix), so GetSection's exact map lookup misses; match by
+	// substring like the other section lookups below.
+	for sectionTitle, section := range doc.Sections {
+		if strings.Contains(sectionTitle, "《伤寒论》原文") && len(section.Content) > 0 {
+			formula.OriginalText = strings.Join(section.Content, "\n")
+			break
+		}
 	}
 
 	// Extract drug-syndrome matching (药证校验)
