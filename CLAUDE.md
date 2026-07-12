@@ -46,7 +46,7 @@ docs/*.md → Loader → InvertedIndex → Agent → Handler → REST API
 
 ## Knowledge Base
 - **Location**: `./docs`
-- **Formulas**: 111 unique in `docs/formulas/shanghanlun/` (112 source files; 桂枝加大黄汤 is duplicated across `taiyin/` + `other/`. `index.md` files are skipped as navigation, not formulas.)
+- **Formulas**: 111 unique in `docs/formulas/shanghanlun/` (111 source files, no duplicates — 桂枝加大黄汤 was consolidated into `taiyin/`. `index.md` files are skipped as navigation, not formulas.)
 - **Herbs**: 54 total in `docs/herbs/`
 - **Load at startup**: `loader.LoadAll()` + `index.BuildIndex(loader)`
 
@@ -171,9 +171,12 @@ GET    /api/v1/health                   - Health check
 - **`index.md` loaded as a fake formula** (`{ID:index}`): `loadFormulas` now skips `index.md`. True unique-formula count is **111** (the prior 112 was inflated by the spurious index entry). `TestLoadAll` and the `/api` stats updated accordingly (stats are now dynamic from `loader.Stats()`).
 - Regression tests: `pkg/markdown` H1 capture; `internal/knowledge` formula names, no-index, herb-column alignment.
 - **`parseMeridians` left `MainMeridians` empty for all herbs**: `归经` cells concatenate organ names with no delimiter (`心肺膀胱`, `脾胃大肠`), but the old code only split on explicit delimiters → one unmatched part → empty. The organ→六经 table was also wrong (肺→太阳, 膀胱→少阴, 小肠→阳明, 肝→少阳). Fixed: longest-match token scan over a corrected table (太阳=膀胱,小肠; 阳明=胃,大肠; 少阳=胆,三焦; 太阴=脾,肺; 少阴=肾,心; 厥阴=肝,心包), dedup preserving order. All 54 herbs now have non-empty `MainMeridians` (桂枝→少阴,太阴,太阳). Regression test: `TestParseMeridians`.
+- **桂枝加大黄汤 duplicated across `taiyin/` + `other/`**: a 34-line stub in `taiyin/` and an 85-line full doc in `other/`. The loader's dir order (taiyin before other) made the `other/` copy win the shared ID, mis-classifying this 太阴 formula (原文 279条 "属太阴也") as `MeridianOther`. Fixed: consolidated the full doc into `taiyin/`, deleted the `other/` copy, removed the stale nav row from `other/index.md`. 太阴 formula count went 6→7. Regression test: `TestGuizhiJiaDahuangConsolidated`.
 
 ## Next Steps
 All 8 phases are complete. Candidate follow-ups (data quality / enhancement):
-- **Duplicate formula doc**: `guizhi_jia_dahuang_tang.md` exists in both `taiyin/` (34-line stub) and `other/` (85-line full); one is a docs-curation call (delete the stub, or move to `taiyang/`). Until resolved the loader keeps the `other/` version (last by dir order).
+- **Variant table formats not parsed**: `ExtractFormula` requires the 4-col `药味|剂量|功效|归经` layout, and the drug-syndrome path requires a leading `功效` column, so formulas using `药味|用量|功效` and `药味|对应症状|作用机制` (e.g. the entire 桂枝加 family) load with `Composition`/`DrugSyndromes` empty. Also `Formula.OriginalText` is empty for ALL formulas (`GetSection("《伤寒论》原文")` misses the `一、《伤寒论》原文` title). Broaden the extractors or normalize the docs.
+- **桂枝加芍药汤 duplicated as two IDs**: `guizhi_jia_shaoyao_tang` (`taiyin/`) and `guizhi_jia_shao_yao_tang` (`other/`) are the same formula under different filename spellings, so both load as separate entries (inflating the unique count). Pick a canonical spelling and merge, mirroring the 桂枝加大黄汤 fix.
+- `other/index.md`'s bottom stat table (其他类 24首 / 总计 41首) doesn't match its actual row count — the index is a curated subset, not a full listing. Reconcile if it's meant to be authoritative.
 - Expand the synonym/vocabulary bridge for patient↔formula terms (currently relies on ClinicalSign + bigrams).
 - Optional: dynamic question generation / free-text symptom intake via the LLM client (Phase 4 future use cases).

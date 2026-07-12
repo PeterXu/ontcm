@@ -33,9 +33,10 @@ func TestLoadAll(t *testing.T) {
 	t.Logf("Loaded %d formulas, %d herbs, %d errors",
 		stats.FormulaCount, stats.HerbCount, stats.ErrorCount)
 
-	// Verify formulas loaded correctly. 112 source .md files exist, but
-	// 桂枝加大黄汤 is duplicated across two dirs (taiyin/ + other/), so there
-	// are 111 unique formula IDs. (index.md files are skipped as navigation.)
+	// Verify formulas loaded correctly. 111 formula .md files → 111 unique
+	// formula IDs. (index.md files are skipped as navigation; the former
+	// 桂枝加大黄汤 duplicate across taiyin/ + other/ was consolidated into
+	// taiyin/, its canonical 太阴 dir per 原文 279条: "属太阴也".)
 	if stats.FormulaCount != 111 {
 		t.Errorf("Expected 111 formulas, got %d", stats.FormulaCount)
 	}
@@ -167,6 +168,49 @@ func TestNoIndexFormulaLoaded(t *testing.T) {
 	}
 	if f := loader.GetFormula("index"); f != nil {
 		t.Errorf("index.md leaked into the formula map as %+v", f)
+	}
+}
+
+// TestGuizhiJiaDahuangConsolidated: 桂枝加大黄汤 was previously duplicated — a
+// 34-line stub in taiyin/ and an 85-line full doc in other/. The loader's dir
+// order (taiyin before other) made the other/ copy overwrite the stub AND
+// mis-classify the formula as 其他 (MeridianOther) instead of 太阴. The full
+// doc is now consolidated into taiyin/ (its canonical dir per 原文 279条:
+// "属太阴也") and the other/ copy removed.
+//
+// Asserts MeridianTaiyin plus full-doc-only 方证要点 rows. Composition and
+// DrugSyndromes are intentionally NOT asserted here: this doc uses 3-column
+// tables (药味|用量|功效 and 药味|对应症状|作用机制), which ExtractFormula and
+// the drug-syndrome path reject (they require the 4-column 药味|剂量|功效|归经
+// layout and a leading 功效 column respectively). That extractor gap is a
+// separate, broader issue affecting every 3-column-table formula.
+func TestGuizhiJiaDahuangConsolidated(t *testing.T) {
+	skipShort(t)
+	loader := NewLoader("../../docs")
+	if err := loader.LoadAll(); err != nil {
+		t.Fatalf("LoadAll: %v", err)
+	}
+	f := loader.GetFormula("guizhi_jia_dahuang_tang")
+	if f == nil {
+		t.Fatal("guizhi_jia_dahuang_tang not loaded")
+	}
+	if f.Meridian != models.MeridianTaiyin {
+		t.Errorf("Meridian: got %v, want MeridianTaiyin (太阴 per 原文 279条)", f.Meridian)
+	}
+	// Full doc has 4 方证要点 rows (大实痛, 腹满, 大便难, 拒按); the stub had 1.
+	if len(f.KeySymptoms) != 4 {
+		t.Errorf("KeySymptoms: got %d, want 4 (full doc, not stub)", len(f.KeySymptoms))
+	}
+	// "大便难" appears only in the full doc's 方证要点, not the stub.
+	hasDaBianNan := false
+	for _, s := range f.KeySymptoms {
+		if strings.Contains(s.Name, "大便难") {
+			hasDaBianNan = true
+			break
+		}
+	}
+	if !hasDaBianNan {
+		t.Error("KeySymptoms missing 大便难 (full-doc-only symptom; stub had only 大实痛)")
 	}
 }
 
