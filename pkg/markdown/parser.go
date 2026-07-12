@@ -66,6 +66,15 @@ func (p *Parser) ParseReader(reader io.Reader) (*Document, error) {
 			}
 			doc.Sections[title] = currentSection
 			doc.SectionOrder = append(doc.SectionOrder, title)
+		} else if strings.HasPrefix(line, "# ") {
+			// H1 — document title (e.g. "# 理中汤药证详解"). Capture only the
+			// first; it is not a section (sections are H2+). Previously H1 lines
+			// had no handler and fell through to "regular content" with a nil
+			// currentSection, silently disappearing — which starved the loader's
+			// name extraction and left most formulas with Name == ID.
+			if doc.Title == "" {
+				doc.Title = strings.TrimSpace(strings.TrimPrefix(line, "# "))
+			}
 		} else if strings.HasPrefix(line, "### ") {
 			// Subsection - treat as nested content
 			if currentSection != nil {

@@ -193,3 +193,33 @@ func TestGetTableFromSection(t *testing.T) {
 		t.Error("Expected to find table in section")
 	}
 }
+
+// TestParseCapturesH1Title: the first `# ` heading must be captured into
+// doc.Title. Regression for the bug where H1 lines were dropped (no `# ` branch
+// existed), so formula-name extraction in the loader could never see the H1 and
+// fell back to a partial ID→name map (→ Name == ID for most formulas).
+func TestParseCapturesH1Title(t *testing.T) {
+	markdownContent := `# 理中汤药证详解
+
+> 理中汤为太阴病主方
+
+## 一、《伤寒论》原文
+
+content
+`
+	parser := NewParser("test.md")
+	doc, err := parser.ParseReader(strings.NewReader(markdownContent))
+	if err != nil {
+		t.Fatalf("ParseReader failed: %v", err)
+	}
+	if doc.Title != "理中汤药证详解" {
+		t.Errorf("doc.Title: got %q, want %q", doc.Title, "理中汤药证详解")
+	}
+	// The H1 must not bleed into the first section's content either.
+	if len(doc.SectionOrder) > 0 {
+		first := doc.SectionOrder[0]
+		if strings.Contains(first, "药证详解") {
+			t.Errorf("H1 leaked into SectionOrder[0]=%q (should be the first H2)", first)
+		}
+	}
+}

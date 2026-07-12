@@ -46,7 +46,7 @@ docs/*.md → Loader → InvertedIndex → Agent → Handler → REST API
 
 ## Knowledge Base
 - **Location**: `./docs`
-- **Formulas**: 112 total in `docs/formulas/shanghanlun/`
+- **Formulas**: 111 unique in `docs/formulas/shanghanlun/` (112 source files; 桂枝加大黄汤 is duplicated across `taiyin/` + `other/`. `index.md` files are skipped as navigation, not formulas.)
 - **Herbs**: 54 total in `docs/herbs/`
 - **Load at startup**: `loader.LoadAll()` + `index.BuildIndex(loader)`
 
@@ -165,9 +165,15 @@ GET    /api/v1/health                   - Health check
 - **`inferMeridianFromTongue`** classified the normal 淡红 tongue as 阳明 (naive 红 match). 淡红 is now correctly normal.
 - Test path bug: `handlers_test.go` used `../../docs` (resolved to nonexistent `internal/docs`, silently loading 0 formulas). Fixed to `../../../docs`.
 
+## Loader data-quality fixes (post-Phase-8) — DONE
+- **Formula `Name == ID` (89/112 formulas)**: root cause was the markdown parser had no `# ` (H1) branch, so `Document.Title` was never set and name extraction fell through to a partial `formulaIDToChinese` map. Fixed: parser now captures the first H1 into `doc.Title`; loader derives the name from it (strips `药证详解`). All formulas now carry their Chinese name.
+- **Herb overview columns mis-aligned** (桂枝 `Nature: "70"`, `Effect: ["心肺膀胱"]`): `loadHerbOverviewFile` read fixed positions, but tier1's table has an extra `出现次数` column tier2/3 lack → every field shifted left. Fixed: header-driven extraction (`herbColIndex`/`herbCell`) resolves columns by name; also populates `Frequency` and splits `核心药证` into `Effect`.
+- **`index.md` loaded as a fake formula** (`{ID:index}`): `loadFormulas` now skips `index.md`. True unique-formula count is **111** (the prior 112 was inflated by the spurious index entry). `TestLoadAll` and the `/api` stats updated accordingly (stats are now dynamic from `loader.Stats()`).
+- Regression tests: `pkg/markdown` H1 capture; `internal/knowledge` formula names, no-index, herb-column alignment.
+
 ## Next Steps
 All 8 phases are complete. Candidate follow-ups (data quality / enhancement):
-- **Formula names (data bug)**: 89/112 formulas load with `Name == ID` (e.g. `banxia_san_ji_tang` appears as the name) — a markdown/loader parsing issue; only ~23 (incl. the 5 canonical cases) parse a Chinese name. Degrades the 方剂 list UI. Fix in `internal/knowledge/loader.go`.
-- **Herb field mapping (data bug)**: herb properties are mis-aligned (e.g. 桂枝 `Nature: "70"`, `Effect: ["心肺膀胱"]` are meridians, not effects) — herb markdown column parsing is off. Same area.
+- **Duplicate formula doc**: `guizhi_jia_dahuang_tang.md` exists in both `taiyin/` (34-line stub) and `other/` (85-line full); one is a docs-curation call (delete the stub, or move to `taiyang/`). Until resolved the loader keeps the `other/` version (last by dir order).
+- **`parseMeridians` ignores concatenated organs**: `归经` cells like `心肺膀胱` / `脾胃大肠` have no delimiter, so `MainMeridians` ends up empty for many herbs. Needs substring-based organ matching. (Herb detail UI hides the empty 归经 line.)
 - Expand the synonym/vocabulary bridge for patient↔formula terms (currently relies on ClinicalSign + bigrams).
 - Optional: dynamic question generation / free-text symptom intake via the LLM client (Phase 4 future use cases).

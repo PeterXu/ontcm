@@ -106,6 +106,9 @@ func (l *Loader) loadFormulas() error {
 			if !strings.HasSuffix(file.Name(), ".md") {
 				continue // Skip non-markdown files
 			}
+			if file.Name() == "index.md" {
+				continue // Directory index is navigation, not a formula
+			}
 
 			filePath := filepath.Join(dirPath, file.Name())
 			err := l.loadFormulaFile(filePath, meridian)
@@ -138,17 +141,16 @@ func (l *Loader) loadFormulaFile(filePath string, meridian models.MeridianType) 
 		Meridian: meridian,
 	}
 
-	// Extract formula name from document title (first section)
-	// The first section title is like "麻黄汤药证详解" -> extract "麻黄汤"
-	if len(doc.SectionOrder) > 0 {
-		firstSectionTitle := doc.SectionOrder[0]
-		if strings.Contains(firstSectionTitle, "药证详解") {
-			formula.Name = strings.TrimSuffix(firstSectionTitle, "药证详解")
-		} else {
-			// If pattern doesn't match, use formulaID converted to Chinese
-			// e.g., "mahuang_tang" -> "麻黄汤"
-			formula.Name = formulaIDToChinese(formulaID)
-		}
+	// Extract formula name from the H1 document title (e.g. "理中汤药证详解"
+	// -> "理中汤"). The parser captures the first H1 into doc.Title; SectionOrder
+	// holds only H2 titles and so cannot be used here (it previously made every
+	// name fall through to the partial formulaIDToChinese map -> Name == ID).
+	if doc.Title != "" {
+		formula.Name = strings.TrimSpace(strings.TrimSuffix(doc.Title, "药证详解"))
+	}
+	if formula.Name == "" {
+		// Last-resort fallback for files without the standard H1 pattern.
+		formula.Name = formulaIDToChinese(formulaID)
 	}
 
 	// Extract composition table (方剂组成)
@@ -341,50 +343,47 @@ func (l *Loader) loadHerbOverviewFile(doc *markdown.Document, tier models.TierTy
 				continue
 			}
 
-			// Extract herbs from each row
-			for _, row := range table.Rows {
-				if len(row) < 6 {
-					continue
-				}
+			// Map canonical column names → indices once per table. This is
+			// header-driven on purpose: tier1's table has an extra 出现次数
+			// column (and 六经归属 instead of 方剂举例) that tier2/3 lack, so a
+			// fixed positional read mis-aligned every field (Nature ← 出现次数,
+			// Effect ← 归经, …). Reading by header name works for both layouts.
+			col := herbColIndex(table.Headers)
 
-				herbName := strings.TrimSpace(row[0])
+			for _, row := range table.Rows {
+				herbName := strings.TrimSpace(herbCell(row, col, "药味"))
 				if herbName == "" || herbName == "药味" {
 					continue // Skip empty or header row
 				}
 
-				// Create herb object
 				herb := &models.Herb{
 					ID:   strings.ToLower(strings.ReplaceAll(herbName, " ", "_")),
 					Name: herbName,
 					Tier: tier,
 				}
 
-				// Extract properties from table
+				if freqText := strings.TrimSpace(herbCell(row, col, "出现次数")); freqText != "" {
+					herb.Frequency = parseLeadingInt(freqText) // "70" or "约31次" → int
+				}
+
 				herb.Properties = models.HerbProperties{
-					Nature: strings.TrimSpace(row[1]), // 药性
+					Nature: strings.TrimSpace(herbCell(row, col, "药性")),
 				}
 
-				// Extract meridians (归经)
-				meridians := strings.TrimSpace(row[2])
-				herb.MainMeridians = parseMeridians(meridians)
+				herb.MainMeridians = parseMeridians(strings.TrimSpace(herbCell(row, col, "归经")))
 
-				// Extract dose information (经方常用量)
-				doseText := strings.TrimSpace(row[3])
-				herb.Properties.Effect = []string{doseText}
-
-				// Extract core drug syndrome (核心药证)
-				coreSyndrome := strings.TrimSpace(row[4])
-				hs := models.HerbDrugSyndrome{
-					Effect:  coreSyndrome,
-					Symptom: coreSyndrome,
+				// 核心药证 = the herb's core therapeutic actions; populate both
+				// the effect list and a drug-syndrome entry.
+				if core := strings.TrimSpace(herbCell(row, col, "核心药证")); core != "" {
+					herb.Properties.Effect = splitHerbList(core)
+					hs := models.HerbDrugSyndrome{
+						Effect:         core,
+						Symptom:        core,
+						ExampleFormula: strings.TrimSpace(herbCell(row, col, "方剂举例")),
+					}
+					herb.DrugSyndromes = append(herb.DrugSyndromes, hs)
 				}
-				herb.DrugSyndromes = append(herb.DrugSyndromes, hs)
 
-				// Extract example formulas (方剂举例)
-				formulas := strings.TrimSpace(row[5])
-				hs.ExampleFormula = formulas
-
-				// Store herb
 				l.Herbs[herb.ID] = herb
 			}
 		}
@@ -457,6 +456,64 @@ func (l *Loader) loadHerbDetailFile(doc *markdown.Document, tier models.TierType
 	}
 
 	return nil
+}
+
+// herbOverviewCols are the canonical herb-table columns the loader reads by
+// name (the source column order is irrelevant). Kept as a var so the substring
+// match below has a stable iteration order.
+var herbOverviewCols = []string{
+	"药味", "出现次数", "药性", "归经", "经方常用量", "核心药证", "方剂举例", "六经归属",
+}
+
+// herbColIndex maps each canonical column key to its index in headers, matching
+// by substring so a decorated header (e.g. "药性(寒热)") still resolves. Missing
+// columns are simply absent from the map.
+func herbColIndex(headers []string) map[string]int {
+	m := make(map[string]int, len(herbOverviewCols))
+	for _, key := range herbOverviewCols {
+		for i, h := range headers {
+			if strings.Contains(h, key) {
+				m[key] = i
+				break
+			}
+		}
+	}
+	return m
+}
+
+// herbCell returns row[col[key]], or "" if the column or row cell is absent.
+func herbCell(row []string, col map[string]int, key string) string {
+	i, ok := col[key]
+	if !ok || i < 0 || i >= len(row) {
+		return ""
+	}
+	return row[i]
+}
+
+// splitHerbList splits a CJK/ASCII-delimited list like "解表、温通经脉" into fields.
+func splitHerbList(s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	return strings.FieldsFunc(s, func(r rune) bool {
+		return r == '、' || r == '，' || r == ',' || r == '；' || r == ';'
+	})
+}
+
+// parseLeadingInt pulls the first run of digits out of a cell like "70" or
+// "约31次" → 70 / 31. Returns 0 when there are no digits.
+func parseLeadingInt(s string) int {
+	n, started := 0, false
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			n = n*10 + int(r-'0')
+			started = true
+		} else if started {
+			break
+		}
+	}
+	return n
 }
 
 // parseMeridians converts meridian string to MeridianType array

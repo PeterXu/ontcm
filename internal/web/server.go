@@ -96,7 +96,7 @@ func NewServer(loader *knowledge.Loader, index *knowledge.InvertedIndex, config 
 	diagnosticHandler := handlers.NewDiagnosticHandler(diagnosticAgent, loader, index)
 
 	// Setup routes
-	setupRoutes(router, formulaHandler, herbHandler, healthHandler, diagnosticHandler)
+	setupRoutes(router, loader, formulaHandler, herbHandler, healthHandler, diagnosticHandler)
 
 	return &Server{
 		router:          router,
@@ -117,7 +117,7 @@ func (s *Server) SetLLMClient(c llm.LLMClient) {
 }
 
 // setupRoutes configures all API routes
-func setupRoutes(router *gin.Engine, formulaHandler *handlers.FormulaHandler, herbHandler *handlers.HerbHandler, healthHandler *handlers.HealthHandler, diagnosticHandler *handlers.DiagnosticHandler) {
+func setupRoutes(router *gin.Engine, loader *knowledge.Loader, formulaHandler *handlers.FormulaHandler, herbHandler *handlers.HerbHandler, healthHandler *handlers.HealthHandler, diagnosticHandler *handlers.DiagnosticHandler) {
 	// Health check endpoints
 	router.GET("/api/v1/health", healthHandler.Check)
 	router.GET("/api/v1/stats", healthHandler.Stats)
@@ -173,8 +173,8 @@ func setupRoutes(router *gin.Engine, formulaHandler *handlers.FormulaHandler, he
 				"herbs":     "/api/v1/herbs",
 			},
 			"stats": gin.H{
-				"formulas_loaded": 112,
-				"herbs_loaded":    54,
+				"formulas_loaded": loader.Stats().FormulaCount,
+				"herbs_loaded":    loader.Stats().HerbCount,
 			},
 		})
 	})
