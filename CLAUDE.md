@@ -104,7 +104,8 @@ docs/*.md → Loader → InvertedIndex → Agent → Handler → REST API
 
 ## Key Files
 - `cmd/server/main.go` - Entry point, graceful shutdown
-- `internal/web/server.go` - Router setup, middleware chain
+- `internal/web/server.go` - Router setup, middleware chain, UI routes
+- `internal/web/ui/` - Embedded SPA (`embed.go` + `static/` HTML/CSS/JS)
 - `internal/agent/diagnostic_agent.go` - State machine
 - `internal/agent/step_executor.go` - Step logic
 - `internal/agent/question_templates.go` - Templates for each step
@@ -113,6 +114,9 @@ docs/*.md → Loader → InvertedIndex → Agent → Handler → REST API
 
 ## API Endpoints
 ```
+GET    /                               - Web UI (embedded SPA)
+GET    /static/*                       - UI assets (JS/CSS)
+GET    /api                            - API info (JSON)
 POST   /api/v1/diagnostic              - Start session
 POST   /api/v1/diagnostic/:id/step      - Process step
 GET    /api/v1/diagnostic/:id/state     - Get state
@@ -125,6 +129,12 @@ GET    /api/v1/herbs                    - List herbs
 GET    /api/v1/herbs/:id                - Get herb
 GET    /api/v1/health                   - Health check
 ```
+
+## Phase 7 Status (Web Interface) — COMPLETE
+- Embedded SPA served by the existing Gin server (`internal/web/ui/`, `//go:embed all:static`). UI at `GET /`, assets at `/static/*`, JSON API info moved to `/api`. Vanilla JS + ES modules, CJK system fonts (offline), no new deps.
+- **辨证 wizard** (`diagnostic.js`): renders each step's self-describing `question` payload by `type` (text/number/select/multiselect/textarea), drives the session loop, auto-advances reasoning steps 6→12, shows a 12-step stepper, the emergency-halt screen, and the final prescription (incl. `llm_refinement_reason`).
+- **方剂 / 中药 lookups** (`lookup.js`): master-detail with instant client-side name/keyword filtering (finds a formula by name — e.g. "理中" → 理中汤 — which the symptom-only `/formulas/search` cannot).
+- Verified: 太阴 case → 理中汤 end-to-end; emergency halt (`status=halted`); `/static` MIME correct (`text/javascript` for ES modules); `go test ./...` green (3 new ui tests).
 
 ## Domain Terminology
 - 六经辨证 (Six Meridians diagnosis) - Core diagnostic method
@@ -156,6 +166,8 @@ GET    /api/v1/health                   - Health check
 - Test path bug: `handlers_test.go` used `../../docs` (resolved to nonexistent `internal/docs`, silently loading 0 formulas). Fixed to `../../../docs`.
 
 ## Next Steps
-- Phase 4: LM Studio integration for question generation and severity-based formula selection (e.g. exact 承气汤 member)
-- Phase 7: Web interface (optional)
-- Expand the synonym/vocabulary bridge for patient↔formula terms (currently relies on ClinicalSign + bigrams)
+All 8 phases are complete. Candidate follow-ups (data quality / enhancement):
+- **Formula names (data bug)**: 89/112 formulas load with `Name == ID` (e.g. `banxia_san_ji_tang` appears as the name) — a markdown/loader parsing issue; only ~23 (incl. the 5 canonical cases) parse a Chinese name. Degrades the 方剂 list UI. Fix in `internal/knowledge/loader.go`.
+- **Herb field mapping (data bug)**: herb properties are mis-aligned (e.g. 桂枝 `Nature: "70"`, `Effect: ["心肺膀胱"]` are meridians, not effects) — herb markdown column parsing is off. Same area.
+- Expand the synonym/vocabulary bridge for patient↔formula terms (currently relies on ClinicalSign + bigrams).
+- Optional: dynamic question generation / free-text symptom intake via the LLM client (Phase 4 future use cases).
