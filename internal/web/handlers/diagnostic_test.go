@@ -14,6 +14,7 @@ import (
 
 	"ontcm/internal/agent"
 	"ontcm/internal/knowledge"
+	"ontcm/internal/knowledge/models"
 	"ontcm/internal/web/session"
 )
 
@@ -80,4 +81,26 @@ func TestStartSession_ReturnsStep1Question(t *testing.T) {
 	assert.Equal(t, 1, resp.CurrentStep)
 	assert.Equal(t, "主诉与病史", resp.StepName)
 	assert.NotNil(t, resp.Question, "step 1 must serve a question template")
+}
+
+// TestMatchedSymptomsFor_PicksSelectedCandidate: the response must report the
+// matched symptoms of the *selected* formula, not FormulaCandidates[0]. After
+// an LLM tie-break, the selected formula may be a different tied candidate.
+// Regression for the bug where the handler always read Candidates[0].
+func TestMatchedSymptomsFor_PicksSelectedCandidate(t *testing.T) {
+	session := &models.DiagnosticSession{
+		// Rule-based sort left 小承气汤 at [0]; the LLM picked 大承气汤.
+		SelectedFormula: &models.Formula{ID: "da_chengqi_tang", Name: "大承气汤"},
+		FormulaCandidates: []models.FormulaMatch{
+			{FormulaID: "xiao_chengqi_tang", MatchedSymptoms: []string{"便秘", "潮热"}},
+			{FormulaID: "da_chengqi_tang", MatchedSymptoms: []string{"便秘", "潮热", "腹痛拒按"}},
+		},
+	}
+
+	got := matchedSymptomsFor(session, "da_chengqi_tang")
+	assert.Equal(t, []string{"便秘", "潮热", "腹痛拒按"}, got,
+		"must return the SELECTED formula's symptoms, not Candidates[0]'s")
+
+	// Unknown id (defensive) yields nil, not Candidates[0].
+	assert.Nil(t, matchedSymptomsFor(session, "nope"))
 }

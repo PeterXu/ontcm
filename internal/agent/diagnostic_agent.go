@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -204,8 +205,19 @@ func (a *DiagnosticAgent) StartSession(patientInfo models.PatientInput) (*models
 	return session, nil
 }
 
-// ProcessStep processes input for the current step and advances to next
+// ProcessStep processes input for the current step and advances to next.
+// It is the convenience entry point for callers without a request context
+// (e.g. tests); HTTP handlers should prefer ProcessStepCtx so a client
+// disconnect cancels in-flight LLM work.
 func (a *DiagnosticAgent) ProcessStep(sessionID string, step int, input map[string]interface{}) (*models.DiagnosticSession, error) {
+	return a.ProcessStepCtx(context.Background(), sessionID, step, input)
+}
+
+// ProcessStepCtx is the context-aware variant of ProcessStep. The context
+// propagates down to any LLM call made during the step (step 12 tie-break),
+// so cancelling it aborts the LLM HTTP request instead of blocking until the
+// client's own timeout.
+func (a *DiagnosticAgent) ProcessStepCtx(ctx context.Context, sessionID string, step int, input map[string]interface{}) (*models.DiagnosticSession, error) {
 	// Retrieve session
 	session, err := a.sessionStore.Get(sessionID)
 	if err != nil {
@@ -223,7 +235,7 @@ func (a *DiagnosticAgent) ProcessStep(sessionID string, step int, input map[stri
 	}
 
 	// Execute the step
-	err = a.executeStep(session, input)
+	err = a.executeStep(ctx, session, input)
 	if err != nil {
 		return nil, fmt.Errorf("step execution failed: %w", err)
 	}
@@ -269,8 +281,9 @@ func (a *DiagnosticAgent) EndSession(sessionID string) error {
 	return a.sessionStore.Update(sessionID, session)
 }
 
-// executeStep executes the logic for a specific step
-func (a *DiagnosticAgent) executeStep(session *models.DiagnosticSession, input map[string]interface{}) error {
+// executeStep executes the logic for a specific step. ctx is propagated only
+// to steps that perform I/O (currently step 12's optional LLM call).
+func (a *DiagnosticAgent) executeStep(ctx context.Context, session *models.DiagnosticSession, input map[string]interface{}) error {
 	switch session.CurrentStep {
 	case 1:
 		return a.executeStep1(session, input)
@@ -295,7 +308,7 @@ func (a *DiagnosticAgent) executeStep(session *models.DiagnosticSession, input m
 	case 11:
 		return a.executeStep11(session, input)
 	case 12:
-		return a.executeStep12(session, input)
+		return a.executeStep12(ctx, session, input)
 	default:
 		return fmt.Errorf("invalid step: %d", session.CurrentStep)
 	}

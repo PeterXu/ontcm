@@ -427,7 +427,7 @@ func (a *DiagnosticAgent) executeStep11(session *models.DiagnosticSession, input
 }
 
 // executeStep12 selects final formula and generates prescription
-func (a *DiagnosticAgent) executeStep12(session *models.DiagnosticSession, input map[string]interface{}) error {
+func (a *DiagnosticAgent) executeStep12(ctx context.Context, session *models.DiagnosticSession, input map[string]interface{}) error {
 	// Select formula with highest match score
 	if len(session.FormulaCandidates) == 0 {
 		return fmt.Errorf("no formula candidates available")
@@ -456,7 +456,7 @@ func (a *DiagnosticAgent) executeStep12(session *models.DiagnosticSession, input
 	// If the top candidates are tied, the rule-based score cannot decide
 	// between them. When an LLM is available, ask it to resolve the tie;
 	// otherwise leave the rule-based pick. See refineFormulaSelection.
-	if chosenID, reason, ok := a.refineFormulaSelection(session); ok {
+	if chosenID, reason, ok := a.refineFormulaSelection(ctx, session); ok {
 		if f := a.loader.GetFormula(chosenID); f != nil {
 			session.SelectedFormula = f
 			session.LLMRefinementReason = reason
@@ -481,27 +481,38 @@ func (a *DiagnosticAgent) executeStep12(session *models.DiagnosticSession, input
 	return nil
 }
 
+// refinementTimeout bounds each LLM tie-break call so a slow/unresponsive
+// model cannot exceed the server's WriteTimeout. It is a package var (not a
+// const) so tests can shrink it to assert the timeout path deterministically.
+// 8s leaves headroom under the default 10s WriteTimeout for the response.
+var refinementTimeout = 8 * time.Second
+
 // refineFormulaSelection asks the attached LLM to choose among the top-scoring
 // candidates when rule-based scoring cannot decide between them (a tie).
 //
 // It returns (chosenID, reason, true) only when an LLM is attached, two or
 // more candidates are tied at the top score, the LLM responds with a valid
 // JSON choice, AND that choice is among the tied candidates. Anything else —
-// no LLM, no tie, LLM error, unparseable response, or an out-of-set choice —
-// returns (..., false) so the caller keeps the rule-based selection.
+// no LLM, no tie, LLM error/timeout, unparseable response, or an out-of-set
+// choice — returns (..., false) so the caller keeps the rule-based selection.
+//
+// ctx is honoured by the LLM call; cancellation (client disconnect, deadline)
+// aborts the request rather than blocking on the client's own timeout.
 //
 // FormulaCandidates must already be sorted by score descending (executeStep12
 // sorts before calling).
-func (a *DiagnosticAgent) refineFormulaSelection(session *models.DiagnosticSession) (chosenID, reason string, ok bool) {
+func (a *DiagnosticAgent) refineFormulaSelection(ctx context.Context, session *models.DiagnosticSession) (chosenID, reason string, ok bool) {
 	if a.llm == nil || len(session.FormulaCandidates) < 2 {
 		return "", "", false
 	}
 
-	// Collect candidates tied with the top score (small delta for float noise).
+	// Collect candidates tied with the top score. MatchScore is built from
+	// integer counts and exact 0.5/1.0 bonuses, so exact equality is safe and
+	// a fuzzy delta would falsely merge genuinely different scores.
 	top := session.FormulaCandidates[0].MatchScore
 	tied := make([]models.FormulaMatch, 0)
 	for _, c := range session.FormulaCandidates {
-		if c.MatchScore >= top-0.01 {
+		if c.MatchScore == top {
 			tied = append(tied, c)
 		}
 	}
@@ -510,7 +521,13 @@ func (a *DiagnosticAgent) refineFormulaSelection(session *models.DiagnosticSessi
 	}
 
 	selCtx := a.buildSelectionContext(session, tied)
-	resp, err := a.llm.Complete(context.Background(), llm.CompleteRequest{
+
+	// Bound the call below the server's WriteTimeout so a slow model can't
+	// outlive the HTTP connection; also honours caller cancellation.
+	callCtx, cancel := context.WithTimeout(ctx, refinementTimeout)
+	defer cancel()
+
+	resp, err := a.llm.Complete(callCtx, llm.CompleteRequest{
 		Messages:    llm.BuildFormulaSelectionMessages(selCtx),
 		Temperature: 0.2,
 		MaxTokens:   300,
@@ -549,8 +566,22 @@ func (a *DiagnosticAgent) buildSelectionContext(session *models.DiagnosticSessio
 		}
 	}
 
-	if session.Tongue.Color != "" || session.Tongue.CoatingColor != "" {
-		selCtx.Tongue = strings.TrimSpace(session.Tongue.Color + " " + session.Tongue.CoatingColor)
+	// Include all collected tongue detail: the 承气汤/白虎汤 distinctions the
+	// LLM is asked to resolve hinge on coating 燥/厚 and body shape, not just
+	// color. Omitting them starves the model of its key differentiating sign.
+	var tongueParts []string
+	for _, v := range []string{
+		session.Tongue.Color,
+		session.Tongue.BodyShape,
+		session.Tongue.CoatingColor,
+		session.Tongue.CoatingThickness,
+	} {
+		if v != "" {
+			tongueParts = append(tongueParts, v)
+		}
+	}
+	if len(tongueParts) > 0 {
+		selCtx.Tongue = strings.Join(tongueParts, "、")
 	}
 	if session.Pulse.Type != "" {
 		selCtx.Pulse = session.Pulse.Type

@@ -89,7 +89,11 @@ func (c *LMStudioClient) Complete(ctx context.Context, req CompleteRequest) (Com
 	}
 	defer httpResp.Body.Close()
 
-	respBody, err := io.ReadAll(httpResp.Body)
+	// Cap the response body: MaxTokens limits generated tokens, not the HTTP
+	// body, so a misconfigured/proxy endpoint returning a huge payload could
+	// otherwise OOM the handler goroutine. 1 MiB is far above any valid
+	// short-formula-choice JSON response.
+	respBody, err := io.ReadAll(io.LimitReader(httpResp.Body, 1<<20))
 	if err != nil {
 		return CompleteResponse{}, ErrLLMUnavailable
 	}

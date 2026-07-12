@@ -86,8 +86,9 @@ func (h *DiagnosticHandler) ProcessStep(c *gin.Context) {
 		return
 	}
 
-	// Process the step
-	session, err := h.agent.ProcessStep(sessionID, req.Step, req.Answers)
+	// Process the step — pass the request context so a client disconnect
+	// cancels any in-flight LLM tie-break call in step 12.
+	session, err := h.agent.ProcessStepCtx(c.Request.Context(), sessionID, req.Step, req.Answers)
 	if err != nil {
 		if err.Error() == "session not found" {
 			c.JSON(http.StatusNotFound, webmodels.ErrorResponse{
@@ -126,13 +127,14 @@ func (h *DiagnosticHandler) ProcessStep(c *gin.Context) {
 	// Add diagnostic results if session complete
 	if session.CurrentStep == 12 && session.SelectedFormula != nil {
 		response.DiagnosticResult = &DiagnosticResult{
-			Meridian:          session.Meridian.String(),
-			EvidenceScore:     session.EvidenceScore,
-			IsReliable:        session.IsReliable(),
-			SelectedFormula:   session.SelectedFormula.Name,
-			FormulaID:         session.SelectedFormula.ID,
-			MatchedSymptoms:   session.FormulaCandidates[0].MatchedSymptoms,
-			Contraindications: session.ContraindicationsChecked,
+			Meridian:           session.Meridian.String(),
+			EvidenceScore:      session.EvidenceScore,
+			IsReliable:         session.IsReliable(),
+			SelectedFormula:    session.SelectedFormula.Name,
+			FormulaID:          session.SelectedFormula.ID,
+			MatchedSymptoms:    matchedSymptomsFor(session, session.SelectedFormula.ID),
+			Contraindications:  session.ContraindicationsChecked,
+			LLMRefinementReason: session.LLMRefinementReason,
 		}
 	}
 
@@ -165,10 +167,11 @@ func (h *DiagnosticHandler) GetSessionState(c *gin.Context) {
 		Meridian:       session.Meridian.String(),
 		EvidenceScore:  session.EvidenceScore,
 		IsReliable:     session.IsReliable(),
-		HasContradiction: session.HasContradiction(),
-		Progress:       float64(session.CurrentStep) / 12.0 * 100,
-		CreatedAt:      session.CreatedAt,
-		UpdatedAt:      session.UpdatedAt,
+		HasContradiction:   session.HasContradiction(),
+		Progress:           float64(session.CurrentStep) / 12.0 * 100,
+		LLMRefinementReason: session.LLMRefinementReason,
+		CreatedAt:          session.CreatedAt,
+		UpdatedAt:          session.UpdatedAt,
 	}
 
 	if len(session.FormulaCandidates) > 0 {
@@ -304,6 +307,19 @@ func (h *DiagnosticHandler) QuickFormula(c *gin.Context) {
 
 // Helper functions
 
+// matchedSymptomsFor returns the matched-symptom list recorded for the given
+// (selected) formula ID. Step 12 may reassign SelectedFormula to the LLM's
+// choice while FormulaCandidates stays rule-sorted, so the response must look
+// up the chosen candidate rather than assuming Candidates[0].
+func matchedSymptomsFor(session *models.DiagnosticSession, formulaID string) []string {
+	for _, c := range session.FormulaCandidates {
+		if c.FormulaID == formulaID {
+			return c.MatchedSymptoms
+		}
+	}
+	return nil
+}
+
 func (h *DiagnosticHandler) getQuestionForStep(step int) interface{} {
 	if step == 2 {
 		// Emergency check - no questions, just validation
@@ -357,13 +373,14 @@ type DiagnosticSessionResponse struct {
 }
 
 type DiagnosticResult struct {
-	Meridian          string   `json:"meridian"`
-	EvidenceScore     int      `json:"evidence_score"`
-	IsReliable        bool     `json:"is_reliable"`
-	SelectedFormula   string   `json:"selected_formula"`
-	FormulaID         string   `json:"formula_id"`
-	MatchedSymptoms   []string `json:"matched_symptoms"`
-	Contraindications []string `json:"contraindications"`
+	Meridian            string   `json:"meridian"`
+	EvidenceScore       int      `json:"evidence_score"`
+	IsReliable          bool     `json:"is_reliable"`
+	SelectedFormula     string   `json:"selected_formula"`
+	FormulaID           string   `json:"formula_id"`
+	MatchedSymptoms     []string `json:"matched_symptoms"`
+	Contraindications   []string `json:"contraindications"`
+	LLMRefinementReason string   `json:"llm_refinement_reason,omitempty"`
 }
 
 type SessionStateResponse struct {
@@ -378,11 +395,12 @@ type SessionStateResponse struct {
 	Meridian         string                    `json:"meridian"`
 	EvidenceScore    int                       `json:"evidence_score"`
 	IsReliable       bool                      `json:"is_reliable"`
-	HasContradiction bool                      `json:"has_contradiction"`
+	HasContradiction  bool                      `json:"has_contradiction"`
 	FormulaCandidates []FormulaCandidateSummary `json:"formula_candidates"`
-	Progress         float64                   `json:"progress"`
-	CreatedAt        time.Time                 `json:"created_at"`
-	UpdatedAt        time.Time                 `json:"updated_at"`
+	Progress          float64                   `json:"progress"`
+	LLMRefinementReason string                  `json:"llm_refinement_reason,omitempty"`
+	CreatedAt         time.Time                 `json:"created_at"`
+	UpdatedAt         time.Time                 `json:"updated_at"`
 }
 
 type FormulaCandidateSummary struct {

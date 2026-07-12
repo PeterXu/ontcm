@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // FakeClient is a test double for LLMClient. It returns a canned response
@@ -13,9 +14,12 @@ import (
 type FakeClient struct {
 	// Handler inspects the request's user message and returns the canned
 	// completion content plus an error. If nil, DefaultContent is returned.
-	Handler       func(userMessage string) (string, error)
+	Handler        func(userMessage string) (string, error)
 	DefaultContent string
-	Fail          bool
+	Fail           bool
+	// Delay, if positive, blocks the call for that duration while honouring the
+	// context — lets tests assert the timeout/cancellation path.
+	Delay time.Duration
 	// Calls records the requests made, for assertions.
 	Calls []CompleteRequest
 }
@@ -23,6 +27,24 @@ type FakeClient struct {
 // Complete satisfies LLMClient.
 func (f *FakeClient) Complete(ctx context.Context, req CompleteRequest) (CompleteResponse, error) {
 	f.Calls = append(f.Calls, req)
+	// Honour cancellation so tests can exercise the timeout/disconnect path:
+	// if the caller's context is already done, surface it as an error and let
+	// the agent fall back to rule-based selection.
+	if err := ctx.Err(); err != nil {
+		return CompleteResponse{}, err
+	}
+	if f.Delay > 0 {
+		t := time.NewTimer(f.Delay)
+		defer t.Stop()
+		select {
+		case <-t.C:
+		case <-ctx.Done():
+			return CompleteResponse{}, ctx.Err()
+		}
+		if err := ctx.Err(); err != nil {
+			return CompleteResponse{}, err
+		}
+	}
 	if f.Fail {
 		return CompleteResponse{}, ErrLLMUnavailable
 	}
