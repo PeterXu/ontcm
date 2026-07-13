@@ -312,7 +312,7 @@ func (a *DiagnosticAgent) executeStep8(session *models.DiagnosticSession, input 
 		herbsWithEvidence := 0
 		for _, herb := range formula.Composition {
 			for _, syndrome := range formula.DrugSyndromes {
-				if syndrome.HerbName != herb.Name {
+				if !herbMatches(herb.Name, syndrome.HerbName) {
 					continue
 				}
 				if drugMatchesAnySymptom(syndrome.TargetSymptom, session.Symptoms) {
@@ -387,6 +387,47 @@ func splitTargetTerms(target string) []string {
 		terms = append(terms, term)
 	}
 	return terms
+}
+
+// herbProcessingPrefixes are the leading 炮制 (processing) markers a herb name
+// can carry: 炙 (honey-roast), 酒 (wine), 炒 (stir-fry), 煅 (calcine), 醋
+// (vinegar). They are stripped when matching a composition herb against its
+// drug-syndrome heading, because the two sources record the processing in
+// different shapes: the composition puts it in parens (甘草（炙）) while the
+// heading uses a prefix (炙甘草). 生/干 are intentionally absent — 生姜 and
+// 干姜 are distinct herbs, not processed forms of a shared base.
+var herbProcessingPrefixes = []string{"炙", "酒", "炒", "煅", "醋"}
+
+// normalizeHerbName reduces a herb name to its unprocessed base so that a
+// composition herb and its drug-syndrome heading match regardless of where the
+// processing is recorded. It strips （…）/(...) annotations, then any leading
+// processing prefix, looping until stable so a compound prefix like 酒炒 also
+// clears. Returns "" for an empty/annotation-only input.
+func normalizeHerbName(s string) string {
+	s = stripParen(s)
+	for {
+		stripped := false
+		for _, p := range herbProcessingPrefixes {
+			if strings.HasPrefix(s, p) {
+				s = s[len(p):]
+				stripped = true
+				break
+			}
+		}
+		if !stripped {
+			return s
+		}
+	}
+}
+
+// herbMatches reports whether a composition herb and a drug-syndrome heading
+// refer to the same base herb, comparing their normalized forms. Used by step 8
+// (药证校验) to associate each DrugSyndrome with its Composition entry.
+func herbMatches(compositionHerb, syndromeHerb string) bool {
+	if compositionHerb == "" || syndromeHerb == "" {
+		return false
+	}
+	return normalizeHerbName(compositionHerb) == normalizeHerbName(syndromeHerb)
 }
 
 // executeStep9 counts supporting evidence
