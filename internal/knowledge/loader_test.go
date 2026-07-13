@@ -542,3 +542,70 @@ func containsStr(xs []string, want string) bool {
 	}
 	return false
 }
+
+// TestKeySymptomsExcludesAssessmentTable: the 方证要点 section holds two tables
+// the parser merges — the real 方证对照表 (| 方证要点 | 临床表现 | 医理 |) and a
+// scoring guide 方证匹配度评估 (| 匹配症状数 | 可靠性 | 建议 |). Both are 3-col, so
+// without a boundary check the assessment header + its rows leaked into
+// KeySymptoms as garbage (匹配症状数, ≥3条…, 纯寒或纯热), inflating the count
+// (wumei_wan was 11 vs 8 real) — which feeds the candidateLess specificity
+// tiebreak and indexes noise terms. The extractor now stops at the assessment
+// header sentinel. Asserts the real 方证对照表 row counts and that no assessment
+// text survives, on two affected docs (厥阴 + 太阴).
+func TestKeySymptomsExcludesAssessmentTable(t *testing.T) {
+	skipShort(t)
+	loader := NewLoader("../../docs")
+	if err := loader.LoadAll(); err != nil {
+		t.Fatalf("LoadAll: %v", err)
+	}
+
+	cases := []struct {
+		id            string
+		wantCount     int
+		wantContains  string // a real 方证对照表 row name
+		garbageNames  []string // assessment-table text that must NOT appear
+	}{
+		{
+			id:           "wumei_wan",
+			wantCount:    8, // 消渴/气上撞心/心中疼热/饥而不欲食/食则吐蛔/时静时烦/厥热往来/久利
+			wantContains: "久利",
+			garbageNames: []string{"匹配症状数", "≥3条", "纯寒或纯热", "可靠性"},
+		},
+		{
+			id:           "lizhong_tang",
+			wantCount:    7, // 腹满/食不下/自利/不渴/喜温/舌淡苔白腻/脉沉弱
+			wantContains: "脉沉弱",
+			garbageNames: []string{"匹配症状数", "≥5条", "3-4条", "<3条", "可靠性"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.id, func(t *testing.T) {
+			f := loader.GetFormula(c.id)
+			if f == nil {
+				t.Fatalf("%s not loaded", c.id)
+			}
+			if len(f.KeySymptoms) != c.wantCount {
+				names := make([]string, len(f.KeySymptoms))
+				for i, s := range f.KeySymptoms {
+					names[i] = s.Name
+				}
+				t.Errorf("KeySymptoms count: got %d, want %d (assessment table leaked in?); names=%v",
+					len(f.KeySymptoms), c.wantCount, names)
+			}
+			found := false
+			for _, s := range f.KeySymptoms {
+				for _, g := range c.garbageNames {
+					if strings.Contains(s.Name, g) || strings.Contains(s.ClinicalSign, g) {
+						t.Errorf("assessment-table text %q leaked into KeySymptoms: %+v", g, s)
+					}
+				}
+				if strings.Contains(s.Name, c.wantContains) {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("KeySymptoms missing real symptom %q", c.wantContains)
+			}
+		})
+	}
+}

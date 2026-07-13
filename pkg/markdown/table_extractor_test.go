@@ -260,6 +260,45 @@ func TestExtractFormulaKeySymptoms(t *testing.T) {
 	}
 }
 
+func TestExtractFormulaKeySymptomsSkipsAssessmentTable(t *testing.T) {
+	// The 方证要点 section holds TWO tables the parser merges into one: the
+	// real 方证对照表 (| 方证要点 | 临床表现 | 医理 |) followed by a scoring
+	// guide, 方证匹配度评估 (| 匹配症状数 | 可靠性 | 建议 |). Both have 3 cols,
+	// so without a boundary check the assessment header + its rows leak in as
+	// garbage FormulaSymptoms (匹配症状数, ≥3条（含寒热错杂特点）, 纯寒或纯热),
+	// inflating len(KeySymptoms) — which feeds the candidateLess specificity
+	// tiebreak — and indexing noise terms. The assessment header row
+	// ("匹配症状数") is a reliable sentinel: it's a meta-term, never a symptom,
+	// and only ever appears as that table's header. Once seen, stop — every row
+	// after it belongs to the assessment table, not symptoms.
+	table := &Table{
+		Headers: []string{"方证要点", "临床表现", "医理"},
+		Rows: [][]string{
+			{"消渴", "口渴多饮", "上热灼津"},
+			{"气上撞心", "胃脘部有气上冲感", "肝气上逆"},
+			{"久利", "长期腹泻", "寒热错杂于肠"},
+			// --- assessment table begins (merged in by the parser) ---
+			{"匹配症状数", "可靠性", "建议"}, // assessment header — sentinel
+			{"≥3条（含寒热错杂特点）", "高", "方证匹配，可用"},
+			{"纯寒或纯热", "—", "方证不符，重新辨证"},
+		},
+	}
+
+	extractor := NewTableExtractor(table)
+	symptoms, err := extractor.ExtractFormulaKeySymptoms()
+	if err != nil {
+		t.Fatalf("ExtractFormulaKeySymptoms failed: %v", err)
+	}
+	if len(symptoms) != 3 {
+		t.Fatalf("Expected 3 symptoms (assessment table dropped), got %d: %+v", len(symptoms), symptoms)
+	}
+	for _, s := range symptoms {
+		if s.Name == "匹配症状数" || s.Name == "≥3条（含寒热错杂特点）" || s.Name == "纯寒或纯热" {
+			t.Errorf("assessment-table row leaked into symptoms: %+v", s)
+		}
+	}
+}
+
 func TestExtractHerbInfo(t *testing.T) {
 	table := &Table{
 		Headers: []string{"药证", "临床表现", "方剂举例"},

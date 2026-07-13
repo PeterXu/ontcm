@@ -181,6 +181,15 @@ func (e *TableExtractor) ExtractSymptomMatcher() ([]SymptomMatcher, error) {
 
 // ExtractFormulaKeySymptoms extracts key symptoms for formula matching
 // Expected format: | 方证要点 | 临床表现 | 医理 |
+//
+// The 方证要点 section usually holds a second table — 方证匹配度评估
+// (| 匹配症状数 | 可靠性 | 建议 |), a scoring guide, NOT symptoms — which the
+// parser merges into one table with the real 方证对照表 (both are 3-col). Its
+// header row ("匹配症状数") is a reliable sentinel: a meta-term that is never a
+// symptom and only ever appears as that table's header. Once it appears, stop —
+// every subsequent row belongs to the assessment table, so continuing would
+// pull garbage like ≥3条 / 纯寒或纯热 into KeySymptoms, inflating the
+// candidateLess specificity tiebreak and indexing noise terms.
 func (e *TableExtractor) ExtractFormulaKeySymptoms() ([]FormulaSymptom, error) {
 	if e.Table == nil || len(e.Table.Headers) < 3 {
 		return nil, fmt.Errorf("invalid table format for formula symptom extraction")
@@ -190,6 +199,11 @@ func (e *TableExtractor) ExtractFormulaKeySymptoms() ([]FormulaSymptom, error) {
 	for _, row := range e.Table.Rows {
 		if len(row) < 3 {
 			continue
+		}
+		// Boundary between the symptom table and the merged-in 方证匹配度评估
+		// scoring guide — stop here (see doc comment).
+		if strings.TrimSpace(row[0]) == "匹配症状数" {
+			break
 		}
 
 		symptom := FormulaSymptom{
