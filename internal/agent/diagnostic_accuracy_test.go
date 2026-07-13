@@ -38,17 +38,19 @@ func runFullDiagnostic(t *testing.T, ag *DiagnosticAgent,
 	return session
 }
 
-// TestDiagnosticAccuracy validates the engine against the five canonical
-// 六经 cases.
+// TestDiagnosticAccuracy validates the engine against all six 六经 meridians.
 //
 // Two accuracy dimensions are measured:
-//   - 定经 (meridian determination): expected to be 5/5. This is the engine's
-//     core capability and is asserted strictly.
+//   - 定经 (meridian determination): expected to be 6/6 — one case per meridian,
+//     including 厥阴 (reached via the cold-heat-complex rule in step 6). This is
+//     the engine's core capability and is asserted strictly.
 //   - 方证对勘 (formula selection): exact formula match where the formula is
 //     uniquely determined by the symptoms. Where multiple formulas in the same
 //     family are equally valid (e.g. the 承气汤 family for 阳明腑实 — the exact
 //     member depends on clinical SEVERITY, which is LLM territory), the test
-//     accepts the correct family and documents the gap.
+//     accepts the correct family and documents the gap. The 厥阴 case is
+//     meridian-only: its 主方 乌梅丸 is not wizard-selectable (see the loop
+//     comment), so it is excluded from the formula-accuracy stats.
 func TestDiagnosticAccuracy(t *testing.T) {
 	ag, _, _ := setupTestAgent(t)
 
@@ -61,6 +63,7 @@ func TestDiagnosticAccuracy(t *testing.T) {
 		wantMeridian    models.MeridianType
 		wantFormulaID   string // exact expected formula
 		acceptFamily    string // if set, any formula whose ID contains this is accepted
+		meridianOnly    bool   // validate 定经 only; formula selection is a documented gap
 	}{
 		{
 			name: "太阴脾虚寒 -> 理中汤",
@@ -148,9 +151,34 @@ func TestDiagnosticAccuracy(t *testing.T) {
 			wantMeridian:  models.MeridianShaoyin,
 			wantFormulaID: "sini_tang",
 		},
+		{
+			// 厥阴寒热错杂: the one meridian defined by a PATTERN (上热下寒 /
+			// cold-heat complex) rather than a characteristic sign cluster. The
+			// 十问 wizard captures no 厥阴-hallmark sign verbatim (气上撞心,
+			// 厥热往来, 吐蛔), so the case presents as heat (消渴→口渴想喝水,
+			// 舌红) mixed with cold (饥不欲食→不想吃, 腹痛, 时泻→稀软) — exactly
+			// the 上热下寒 signature step 6 must recognise as 厥阴 rather than
+			// counting toward 太阴 (the cold signs alone would win the count).
+			name: "厥阴寒热错杂 -> 乌梅丸",
+			step1: map[string]interface{}{
+				"age": 45, "gender": "女", "chief_complaint": "腹痛时作3年伴吐蛔",
+				"history": "口渴喜饮，时泻时止，饥而不欲食，时烦时静",
+			},
+			step3: map[string]interface{}{
+				"appetite":      "不想吃",                       // 饥而不欲食 → cold
+				"thirst_level":  "口渴想喝水",                    // 消渴 → heat
+				"pain_location": []interface{}{"腹痛"},         // 腹痛 → cold
+				"stool_shape":   "稀软",                         // 时泻 → cold
+			},
+			step4: map[string]interface{}{"tongue_color": "红", "tongue_coating": "薄白"},
+			step5: map[string]interface{}{"pulse_tension": "弦"},
+			wantMeridian:  models.MeridianJueyin,
+			wantFormulaID: "wumei_wan",
+			meridianOnly:  true, // 厥阴 主方 not wizard-selectable; see loop comment
+		},
 	}
 
-	meridianOK, exactOK, familyOK := 0, 0, 0
+	meridianOK, exactOK, familyOK, formulaEligible := 0, 0, 0, 0
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			session := runFullDiagnostic(t, ag, tc.step1, tc.step3, tc.step4, tc.step5)
@@ -158,6 +186,27 @@ func TestDiagnosticAccuracy(t *testing.T) {
 			if assert.Equal(t, tc.wantMeridian, session.Meridian, "meridian (定经)") {
 				meridianOK++
 			}
+
+			// meridianOnly cases validate 定经 alone. 厥阴 (寒热错杂) is now
+			// reachable via the cold-heat-complex rule in step 6, but its 主方
+			// 乌梅丸 is not wizard-selectable: the 十问 collects colloquial
+			// multi-char terms (口渴想喝水, 不想吃) that the whole-term symptom
+			// query cannot bridge to 乌梅丸's formal continuous-phrase 方证
+			// (口渴多饮, 饥饿但不想吃) — the index's rune bigrams are deliberately
+			// query-invisible to avoid false-positive bloat — while the cold
+			// signs (不想吃/腹痛/稀软) over-match 太阴's 理中汤 at the whole-term
+			// level. Selecting the 厥阴主方 therefore needs the LLM / free-text
+			// intake path (Phase 4 future use), a deeper gap than 阳明/承气's
+			// severity tie. Log it; exclude from the formula-accuracy stats.
+			if tc.meridianOnly {
+				if session.SelectedFormula != nil {
+					t.Logf("formula (known gap): %s (厥阴主方) not wizard-selectable; engine picked %s — needs LLM/free-text intake",
+						tc.wantFormulaID, session.SelectedFormula.ID)
+				}
+				return
+			}
+
+			formulaEligible++
 
 			if session.SelectedFormula == nil {
 				assert.Fail(t, "no formula selected")
@@ -184,16 +233,17 @@ func TestDiagnosticAccuracy(t *testing.T) {
 
 	n := len(cases)
 	t.Logf("定经 (meridian) accuracy:      %d/%d (%.0f%%)", meridianOK, n, pct(meridianOK, n))
-	t.Logf("方证 exact accuracy:           %d/%d (%.0f%%)", exactOK, n, pct(exactOK, n))
-	t.Logf("方证 family-aware accuracy:    %d/%d (%.0f%%)", familyOK, n, pct(familyOK, n))
+	t.Logf("方证 exact accuracy:           %d/%d (%.0f%%)", exactOK, formulaEligible, pct(exactOK, formulaEligible))
+	t.Logf("方证 family-aware accuracy:    %d/%d (%.0f%%)", familyOK, formulaEligible, pct(familyOK, formulaEligible))
 
 	// Meridian determination is the core capability — require it fully.
 	if meridianOK != n {
 		t.Errorf("meridian accuracy %d/%d below target", meridianOK, n)
 	}
-	// Family-aware formula accuracy meets the ≥85% project target.
-	if float64(familyOK)/float64(n) < 0.85 {
-		t.Errorf("family-aware formula accuracy %d/%d below 85%% target", familyOK, n)
+	// Family-aware formula accuracy meets the ≥85% project target (over the
+	// formula-eligible cases — meridianOnly cases are a separate, logged gap).
+	if formulaEligible > 0 && float64(familyOK)/float64(formulaEligible) < 0.85 {
+		t.Errorf("family-aware formula accuracy %d/%d below 85%% target", familyOK, formulaEligible)
 	}
 }
 

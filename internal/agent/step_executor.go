@@ -208,6 +208,29 @@ func (a *DiagnosticAgent) executeStep6(session *models.DiagnosticSession, input 
 		}
 	}
 
+	// 厥阴 (cold-heat complex / 寒热错杂) is the one 六经 meridian defined by a
+	// pattern — 上热下寒 — rather than a characteristic sign cluster. None of its
+	// hallmarks (气上撞心, 厥热往来, 吐蛔) is capturable by the 十问 wizard, so
+	// single-sign hint counting can never reach it: a 寒热错杂 patient's cold signs
+	// (下利/腹痛/不欲食) and heat signs (消渴/舌红) split their votes across 太阴 and
+	// 阳明, and the cold side wins the raw count. Detect the pattern directly.
+	// Three guards keep it from over-firing:
+	//   1. heat (阳明) and cold (太阴/少阴) both present,
+	//   2. comparable strength — the weaker side is at least half the stronger,
+	//      so a one-sided pattern with a stray opposite hint is not misread,
+	//   3. the heat+cold evidence is at least as strong as the leading single
+	//      meridian, so a 少阳/太阳-dominant case with incidental heat+cold strays
+	//      stays its own meridian.
+	// The five sign-based meridians are each a pure pattern in the canonical
+	// cases, so one side is always empty there and this never fires on them.
+	heatCount := meridianCounts[models.MeridianYangming]
+	coldCount := meridianCounts[models.MeridianTaiyin] + meridianCounts[models.MeridianShaoyin]
+	if heatCount > 0 && coldCount > 0 &&
+		min(heatCount, coldCount)*2 >= max(heatCount, coldCount) &&
+		heatCount+coldCount >= maxCount {
+		selectedMeridian = models.MeridianJueyin
+	}
+
 	session.Meridian = selectedMeridian
 	session.EvidenceScore = maxCount
 
