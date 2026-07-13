@@ -216,31 +216,10 @@ func (l *Loader) loadFormulaFile(filePath string, meridian models.MeridianType) 
 		}
 	}
 
-	// Extract drug-syndrome matching (药证校验)
-	// Look for sections containing "药证"
-	for sectionTitle, section := range doc.Sections {
-		if strings.Contains(sectionTitle, "药证") && len(section.Tables) > 0 {
-			// Parse drug-syndrome tables for each herb
-			for _, table := range section.Tables {
-				extractor := markdown.NewTableExtractor(table)
-				if len(table.Headers) >= 3 && table.Headers[0] == "功效" {
-					syndromes, err := extractor.ExtractDrugSyndrome("")
-					if err == nil {
-						for _, syndrome := range syndromes {
-							ds := models.DrugSyndrome{
-								HerbName:      syndrome.DrugName,
-								Effect:        syndrome.Effect,
-								TargetSymptom: syndrome.TargetSymptom,
-								Verification:  syndrome.Verification,
-							}
-							formula.DrugSyndromes = append(formula.DrugSyndromes, ds)
-						}
-					}
-				}
-			}
-			break // Only use first matching section
-		}
-	}
+	// Extract drug-syndrome matching (药证校验). Handles both table schemas and
+	// re-associates per-herb headings for the merged-table case — see
+	// drug_syndrome.go.
+	formula.DrugSyndromes = extractDrugSyndromes(doc)
 
 	// Extract preparation instructions (煮服法)
 	for _, section := range doc.Sections {

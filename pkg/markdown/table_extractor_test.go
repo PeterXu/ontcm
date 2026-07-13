@@ -165,6 +165,72 @@ func TestExtractDrugSyndrome(t *testing.T) {
 	}
 }
 
+func TestExtractDrugSyndromeHerbDriven(t *testing.T) {
+	// Schema B: | 药味 | 对应症状 | 作用机制 |. The herb name lives in the 药味
+	// column of every row (one table covers all herbs). ExtractDrugSyndrome must
+	// pull DrugName from each row regardless of the passed drugName, map 作用机制
+	// to Effect, and leave Verification empty (no 校验要点 column).
+	table := &Table{
+		Headers: []string{"药味", "对应症状", "作用机制"},
+		Rows: [][]string{
+			{"甘草", "咽中干、烦躁", "补益脾胃、缓急"},
+			{"干姜", "厥、吐逆", "温中散寒"},
+		},
+	}
+
+	extractor := NewTableExtractor(table)
+	syndromes, err := extractor.ExtractDrugSyndrome("")
+	if err != nil {
+		t.Fatalf("ExtractDrugSyndrome herb-driven failed: %v", err)
+	}
+	if len(syndromes) != 2 {
+		t.Fatalf("Expected 2 syndromes, got %d", len(syndromes))
+	}
+	if syndromes[0].DrugName != "甘草" {
+		t.Errorf("syndrome[0] DrugName: got %q, want 甘草 (from 药味 col)", syndromes[0].DrugName)
+	}
+	if syndromes[0].TargetSymptom != "咽中干、烦躁" {
+		t.Errorf("syndrome[0] TargetSymptom: got %q, want 咽中干、烦躁", syndromes[0].TargetSymptom)
+	}
+	if syndromes[0].Effect != "补益脾胃、缓急" {
+		t.Errorf("syndrome[0] Effect: got %q, want 作用机制 mapped to Effect", syndromes[0].Effect)
+	}
+	if syndromes[0].Verification != "" {
+		t.Errorf("syndrome[0] Verification: got %q, want empty (no 校验要点 col)", syndromes[0].Verification)
+	}
+	if syndromes[1].DrugName != "干姜" {
+		t.Errorf("syndrome[1] DrugName: got %q, want 干姜", syndromes[1].DrugName)
+	}
+}
+
+func TestExtractDrugSyndromeSkipsSeamRows(t *testing.T) {
+	// When the parser merges per-herb tables in one section, repeated header
+	// rows ("功效 | 对应症状 | 校验要点") appear as data rows. These seam rows
+	// must be skipped so DrugSyndromes isn't polluted with header text.
+	table := &Table{
+		Headers: []string{"功效", "对应症状", "校验要点"},
+		Rows: [][]string{
+			{"补气", "乏力、少气懒言", "有气虚表现 ✓"},
+			{"功效", "对应症状", "校验要点"}, // seam — must be skipped
+			{"健脾", "食欲差、消瘦", "有脾虚表现 ✓"},
+		},
+	}
+
+	extractor := NewTableExtractor(table)
+	syndromes, err := extractor.ExtractDrugSyndrome("人参")
+	if err != nil {
+		t.Fatalf("ExtractDrugSyndrome failed: %v", err)
+	}
+	if len(syndromes) != 2 {
+		t.Fatalf("Expected 2 syndromes (seam skipped), got %d", len(syndromes))
+	}
+	for _, s := range syndromes {
+		if s.Effect == "功效" || s.TargetSymptom == "对应症状" {
+			t.Errorf("seam row leaked into syndromes: %+v", s)
+		}
+	}
+}
+
 func TestExtractFormulaKeySymptoms(t *testing.T) {
 	table := &Table{
 		Headers: []string{"方证要点", "临床表现", "医理"},

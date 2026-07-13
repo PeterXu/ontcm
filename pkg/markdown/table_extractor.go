@@ -102,27 +102,53 @@ func cellAt(row []string, i int) string {
 	return row[i]
 }
 
-// ExtractDrugSyndrome extracts drug-syndrome matching from a table
-// Expected format: | 功效 | 对应症状 | 校验要点 |
+// ExtractDrugSyndrome extracts drug-syndrome matching from a table.
+//
+// Header-driven — resolves columns by name so it handles both schemas that
+// occur in the docs:
+//   - Schema A (effect-driven): | 功效 | 对应症状 | 校验要点 |. One table per
+//     herb; the herb name comes from the preceding "### 药味——功效" heading, so
+//     the caller passes it via drugName. Effect ← 功效, Verification ← 校验要点.
+//   - Schema B (herb-driven): | 药味 | 对应症状 | 作用机制 |. One table covers
+//     all herbs; the herb name is in the 药味 column of each row, so drugName is
+//     ignored. Effect ← 作用机制 (the herb's mechanism is its effect here);
+//     Verification is empty (no 校验要点 column).
+//
+// 对应症状 is required. Rows that repeat the header text (seam rows left behind
+// when the parser merges per-herb tables) are skipped.
 func (e *TableExtractor) ExtractDrugSyndrome(drugName string) ([]DrugSyndrome, error) {
-	if e.Table == nil || len(e.Table.Headers) < 3 {
+	if e.Table == nil {
 		return nil, fmt.Errorf("invalid table format for drug syndrome extraction")
+	}
+	herbCol := e.colIndex("药味")
+	effectCol := e.colIndexAny("功效", "作用机制")
+	symptomCol := e.colIndex("对应症状")
+	verifCol := e.colIndex("校验要点")
+	if symptomCol < 0 || effectCol < 0 {
+		return nil, fmt.Errorf("table headers do not match drug-syndrome format")
 	}
 
 	var syndromes []DrugSyndrome
 	for _, row := range e.Table.Rows {
-		if len(row) < 3 {
+		herb := drugName
+		if herbCol >= 0 {
+			herb = strings.TrimSpace(cellAt(row, herbCol))
+		}
+		effect := strings.TrimSpace(cellAt(row, effectCol))
+		target := strings.TrimSpace(cellAt(row, symptomCol))
+		if herb == "" || target == "" {
 			continue
 		}
-
-		syndrome := DrugSyndrome{
-			DrugName:      drugName,
-			Effect:        strings.TrimSpace(row[0]),
-			TargetSymptom: strings.TrimSpace(row[1]),
-			Verification:  strings.TrimSpace(row[2]),
+		// Skip seam rows — repeated header text from merged per-herb tables.
+		if target == "对应症状" || effect == "功效" || effect == "作用机制" || herb == "药味" {
+			continue
 		}
-
-		syndromes = append(syndromes, syndrome)
+		syndromes = append(syndromes, DrugSyndrome{
+			DrugName:      herb,
+			Effect:        effect,
+			TargetSymptom: target,
+			Verification:  strings.TrimSpace(cellAt(row, verifCol)),
+		})
 	}
 
 	return syndromes, nil

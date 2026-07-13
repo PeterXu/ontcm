@@ -396,3 +396,93 @@ func equalMeridians(a, b []models.MeridianType) bool {
 	}
 	return true
 }
+
+// TestDrugSyndromeSchemaA: the effect-driven schema (| 功效 | 对应症状 | 校验要点 |,
+// one table per herb under a "### 药味——功效" heading). The parser merges the
+// per-herb tables into one table; the loader must split on the seam rows and
+// pair each group with the herb named in its heading — producing real HerbName
+// values and no header-text garbage.
+func TestDrugSyndromeSchemaA(t *testing.T) {
+	skipShort(t)
+	loader := NewLoader("../../docs")
+	if err := loader.LoadAll(); err != nil {
+		t.Fatalf("LoadAll: %v", err)
+	}
+	f := loader.GetFormula("lizhong_tang")
+	if f == nil {
+		t.Fatal("lizhong_tang not loaded")
+	}
+
+	// Each herb's group must carry its heading herb name.
+	herbNames := make(map[string]bool)
+	for _, ds := range f.DrugSyndromes {
+		herbNames[ds.HerbName] = true
+		// No seam/header-text garbage should survive.
+		if ds.Effect == "功效" || ds.TargetSymptom == "对应症状" {
+			t.Errorf("header-text row leaked into DrugSyndromes: %+v", ds)
+		}
+	}
+	for _, herb := range []string{"人参", "白术", "干姜", "炙甘草"} {
+		if !herbNames[herb] {
+			t.Errorf("DrugSyndromes missing HerbName %q (got %v)", herb, herbNames)
+		}
+	}
+
+	// 干姜's group targets 怕冷/四肢凉 — verify the pairing landed symptoms under
+	// the right herb, not just any herb.
+	var ganjiangTargets []string
+	for _, ds := range f.DrugSyndromes {
+		if ds.HerbName == "干姜" {
+			ganjiangTargets = append(ganjiangTargets, ds.TargetSymptom)
+		}
+	}
+	if !containsStr(ganjiangTargets, "怕冷、四肢凉") {
+		t.Errorf("干姜 DrugSyndromes missing 怕冷、四肢凉 (pairing misaligned?); got %v", ganjiangTargets)
+	}
+}
+
+// TestDrugSyndromeSchemaB: the herb-driven schema (| 药味 | 对应症状 | 作用机制 |).
+// Previously rejected by the Headers[0]=="功效" gate, so DrugSyndromes was empty.
+// Now the herb name comes from the 药味 column of each row.
+func TestDrugSyndromeSchemaB(t *testing.T) {
+	skipShort(t)
+	loader := NewLoader("../../docs")
+	if err := loader.LoadAll(); err != nil {
+		t.Fatalf("LoadAll: %v", err)
+	}
+	f := loader.GetFormula("gancao_ganjiang_tang")
+	if f == nil {
+		t.Fatal("gancao_ganjiang_tang not loaded")
+	}
+	if len(f.DrugSyndromes) == 0 {
+		t.Fatal("Schema B DrugSyndromes empty (the 药味 schema must now be parsed)")
+	}
+
+	want := map[string]string{ // HerbName → a TargetSymptom substring
+		"甘草": "咽中干",
+		"干姜": "厥",
+	}
+	seen := map[string]bool{}
+	for _, ds := range f.DrugSyndromes {
+		seen[ds.HerbName] = true
+		for herb, sub := range want {
+			if ds.HerbName == herb && !strings.Contains(ds.TargetSymptom, sub) {
+				t.Errorf("HerbName %q TargetSymptom: got %q, want substring %q", herb, ds.TargetSymptom, sub)
+			}
+		}
+	}
+	for herb := range want {
+		if !seen[herb] {
+			t.Errorf("DrugSyndromes missing HerbName %q (got %v)", herb, seen)
+		}
+	}
+}
+
+func containsStr(xs []string, want string) bool {
+	for _, x := range xs {
+		if x == want {
+			return true
+		}
+	}
+	return false
+}
