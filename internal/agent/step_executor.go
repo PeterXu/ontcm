@@ -426,6 +426,32 @@ func (a *DiagnosticAgent) executeStep11(session *models.DiagnosticSession, input
 	return nil
 }
 
+// candidateLess reports whether x should rank before y when sorting formula
+// candidates. It is a strict total order, so the sort is deterministic
+// regardless of the map-iteration order candidates arrive in:
+//  1. MatchScore, higher first.
+//  2. Specificity: fewer total 方证要点 ranks first. An aggregate overview
+//     (e.g. 承气汤类, which indexes symptoms from several formulas) over-matches;
+//     on a score tie the narrower formula is the more confident pick.
+//  3. FormulaID ascending — the final deterministic fallback.
+func (a *DiagnosticAgent) candidateLess(x, y models.FormulaMatch) bool {
+	if x.MatchScore != y.MatchScore {
+		return x.MatchScore > y.MatchScore
+	}
+	const worstSpecificity = 1 << 30 // unknown/not-found → ranks last
+	xn, yn := worstSpecificity, worstSpecificity
+	if f := a.loader.GetFormula(x.FormulaID); f != nil {
+		xn = len(f.KeySymptoms)
+	}
+	if f := a.loader.GetFormula(y.FormulaID); f != nil {
+		yn = len(f.KeySymptoms)
+	}
+	if xn != yn {
+		return xn < yn
+	}
+	return x.FormulaID < y.FormulaID
+}
+
 // executeStep12 selects final formula and generates prescription
 func (a *DiagnosticAgent) executeStep12(ctx context.Context, session *models.DiagnosticSession, input map[string]interface{}) error {
 	// Select formula with highest match score
@@ -433,10 +459,11 @@ func (a *DiagnosticAgent) executeStep12(ctx context.Context, session *models.Dia
 		return fmt.Errorf("no formula candidates available")
 	}
 
-	// Sort by match score (simple selection sort)
+	// Sort by candidateLess (MatchScore desc, then specificity, then FormulaID)
+	// so tied candidates break deterministically rather than by map-iteration order.
 	for i := 0; i < len(session.FormulaCandidates)-1; i++ {
 		for j := i + 1; j < len(session.FormulaCandidates); j++ {
-			if session.FormulaCandidates[j].MatchScore > session.FormulaCandidates[i].MatchScore {
+			if a.candidateLess(session.FormulaCandidates[j], session.FormulaCandidates[i]) {
 				session.FormulaCandidates[i], session.FormulaCandidates[j] =
 					session.FormulaCandidates[j], session.FormulaCandidates[i]
 			}

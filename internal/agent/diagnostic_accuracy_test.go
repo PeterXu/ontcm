@@ -203,3 +203,30 @@ func pct(num, den int) float64 {
 	}
 	return float64(num) / float64(den) * 100
 }
+
+// TestCandidateLessTiebreak: step 12 must break score ties deterministically.
+// Tied candidates previously kept their map-iteration input order, so the
+// 阳明腑实 case flipped between da_chengqi_tang and the 承气汤类 aggregate
+// (chengqi_tang) run-to-run. The tiebreaker is specificity — a formula with
+// fewer total 方证要点 is the more focused match (the aggregate indexes
+// symptoms from several formulas and over-matches) — then FormulaID.
+func TestCandidateLessTiebreak(t *testing.T) {
+	ag, _, _ := setupTestAgent(t)
+
+	da := models.FormulaMatch{FormulaID: "da_chengqi_tang", MatchScore: 3.0} // 5 KeySymptoms
+	agg := models.FormulaMatch{FormulaID: "chengqi_tang", MatchScore: 3.0}   // 16 KeySymptoms (aggregate)
+
+	// Tied score: the specific formula ranks first.
+	if !ag.candidateLess(da, agg) {
+		t.Error("on a score tie, da_chengqi_tang (specific) must rank before chengqi_tang (aggregate)")
+	}
+	if ag.candidateLess(agg, da) {
+		t.Error("on a score tie, the aggregate must NOT rank before the specific formula")
+	}
+
+	// Different scores: MatchScore dominates regardless of specificity.
+	high := models.FormulaMatch{FormulaID: "chengqi_tang", MatchScore: 5.0}
+	if !ag.candidateLess(high, da) {
+		t.Error("a higher MatchScore must rank first even when the formula is less specific")
+	}
+}
