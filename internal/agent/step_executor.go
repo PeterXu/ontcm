@@ -225,7 +225,20 @@ func (a *DiagnosticAgent) executeStep6(session *models.DiagnosticSession, input 
 	// cases, so one side is always empty there and this never fires on them.
 	heatCount := meridianCounts[models.MeridianYangming]
 	coldCount := meridianCounts[models.MeridianTaiyin] + meridianCounts[models.MeridianShaoyin]
-	if heatCount > 0 && coldCount > 0 &&
+
+	// 少阴热化 (阴虚火旺) is the other 少阴 sub-pattern besides 寒化. The 十问
+	// wizard maps only 寒化 signs to 少阴 (嗜睡/口渴但不想喝/畏寒/尿频), so a 热化
+	// patient's heat signs (舌红→阳明, 脉数→阳明, 心烦失眠→少阳) all bleed away
+	// from 少阴 — unreachable by single-sign counting, exactly as 厥阴 was. The
+	// differentiator is the 阴虚 tongue (舌红 + 无苔/剥苔): pathognomonic for 阴虚,
+	// which in 六经 is 少阴热化. 阳明实热 always carries 黄苔/大汗/腑实, never 少苔,
+	// so when the 阴虚 tongue is present AND no 阳明实热 sign rules it out, override
+	// to 少阴 regardless of the (阳明-dominated) hint count. Placed BEFORE the 厥阴
+	// rule: a 阴虚-tongue case is 少阴热化, not 寒热错杂 (厥阴's tongue is 薄白, not
+	// 无苔, so the two never collide on the canonical cases).
+	if isYinDeficiencyTongue(session.Tongue) && !hasYangmingExcessHeat(session) {
+		selectedMeridian = models.MeridianShaoyin
+	} else if heatCount > 0 && coldCount > 0 &&
 		min(heatCount, coldCount)*2 >= max(heatCount, coldCount) &&
 		heatCount+coldCount >= maxCount {
 		selectedMeridian = models.MeridianJueyin
@@ -801,4 +814,37 @@ func (a *DiagnosticAgent) inferMeridianFromPulse(pulse models.PulseReading) mode
 	}
 
 	return models.MeridianOther
+}
+
+// isYinDeficiencyTongue reports whether the tongue shows the 阴虚 (yin-deficiency)
+// pattern: a red body (红/绛, but NOT the normal 淡红) with the coating stripped
+// (无苔/剥苔). This is the pathognomonic sign for 少阴热化 (阴虚火旺); 阳明实热
+// always carries 黄苔, never a stripped coating. Used by step 6's 少阴热化 override.
+func isYinDeficiencyTongue(t models.TongueReading) bool {
+	if !strings.Contains(t.Color, "红") && !strings.Contains(t.Color, "绛") {
+		return false
+	}
+	if strings.Contains(t.Color, "淡红") {
+		return false // 淡红 is the normal tongue color, not a 热/阴虚 sign
+	}
+	return t.CoatingColor == "无苔" || t.CoatingColor == "剥苔"
+}
+
+// hasYangmingExcessHeat reports whether the session carries a 阳明实热 sign that
+// rules out a 阴虚虚热 (少阴热化) reading: 黄苔 (经热/腑实), 大汗 (阳明四大), or
+// 腑实 (便秘/不大便). Used by step 6's 少阴热化 override to keep a mixed picture
+// (e.g. 阴虚 tongue with coincident 大汗) on the 阳明 meridian rather than
+// misreading it as 少阴热化.
+func hasYangmingExcessHeat(session *models.DiagnosticSession) bool {
+	if strings.Contains(session.Tongue.CoatingColor, "黄") {
+		return true
+	}
+	for _, s := range session.Symptoms {
+		if strings.Contains(s.Symptom, "大汗") ||
+			strings.Contains(s.Symptom, "便秘") ||
+			strings.Contains(s.Symptom, "不大便") {
+			return true
+		}
+	}
+	return false
 }

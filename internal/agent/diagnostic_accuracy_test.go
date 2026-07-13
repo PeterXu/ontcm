@@ -32,8 +32,24 @@ func runFullDiagnostic(t *testing.T, ag *DiagnosticAgent,
 		if in == nil {
 			in = map[string]interface{}{}
 		}
-		session, err = ag.ProcessStep(session.ID, s.step, in)
-		assert.NoError(t, err, "step %d should succeed", s.step)
+		next, err := ag.ProcessStep(session.ID, s.step, in)
+		if err != nil {
+			// "no formula candidates" at step 12 is a legitimate end-state for a
+			// meridianOnly case whose 主方 is not wizard-selectable (e.g. 少阴热化/
+			// 黄连阿胶汤 — its 心烦不得卧 hallmark shares no index term with the
+			// wizard's 入睡难, so step 7 surfaces no candidate). Tolerate it: keep
+			// the last good session so callers can still inspect Meridian (set at
+			// step 6), and let the case loop log the gap. Any other step error is a
+			// real failure. Either way, don't overwrite `session` with the nil
+			// ProcessStep returns on error, so the caller never nil-derefs.
+			if s.step == 12 && strings.Contains(err.Error(), "no formula candidates") {
+				t.Logf("step 12: no formula candidates (meridianOnly gap tolerated)")
+			} else {
+				assert.NoError(t, err, "step %d should succeed", s.step)
+			}
+			break
+		}
+		session = next
 	}
 	return session
 }
@@ -176,6 +192,80 @@ func TestDiagnosticAccuracy(t *testing.T) {
 			wantFormulaID: "wumei_wan",
 			meridianOnly:  true, // 厥阴 主方 not wizard-selectable; see loop comment
 		},
+		{
+			// 太阳表虚: the differentiating counterpart of 太阳表实 (麻黄汤). Both
+			// share 头痛/发热/脉浮, but 表虚 has 有汗 + 脉浮缓 vs 表实's 无汗 +
+			// 脉浮紧. The step-7 meridian+required bonus breaks the tie in 桂枝汤's
+			// favour, and the 方证匹配度评估 fix (no longer leaking 桂枝汤's "无汗"
+			// contrast-row as a KeySymptom) keeps 桂枝汤 from matching a 无汗
+			// patient at all. From guizhi_tang.md §典型案例 (女,32, 发热怕风2天).
+			name: "太阳表虚 -> 桂枝汤",
+			step1: map[string]interface{}{
+				"age": 32, "gender": "女", "chief_complaint": "发热怕风2天",
+				"history": "出汗，怕风，轻微头痛",
+			},
+			step3: map[string]interface{}{
+				"sweat_status":   "有汗",
+				"pain_location":  []interface{}{"头痛"},
+				"fever_status":   "发热",
+				"cold_sensation": "恶风（怕风）",
+			},
+			step4: map[string]interface{}{"tongue_coating": "薄白"},
+			step5: map[string]interface{}{"pulse_depth": "浮", "pulse_tension": "缓"},
+			wantMeridian:  models.MeridianTaiyang,
+			wantFormulaID: "guizhi_tang",
+		},
+		{
+			// 阳明经证 (白虎汤): the differentiating counterpart of 阳明腑实
+			// (承气汤). Both are 阳明热, but 经证 is 无形之热 (四大: 大热/大汗/大渴/
+			// 脉洪大, NO 腑实) vs 腑实's 有形之热 (便秘+腹满痛+潮热). The
+			// differentiator is the ABSENCE of 便秘/腹痛 + presence of 大汗/高热.
+			// From baihu_tang.md §典型案例 (男,40, 高热2天).
+			name: "阳明经证 -> 白虎汤",
+			step1: map[string]interface{}{
+				"age": 40, "gender": "男", "chief_complaint": "高热2天",
+				"history": "大汗出，口渴明显想喝凉水，无便秘无腹痛",
+			},
+			step3: map[string]interface{}{
+				"sweat_status":  "大汗",
+				"thirst_level":  "口渴想喝水",
+				"thirst_temp":   "想喝凉水",
+				"water_amount":  "喝很多",
+				"urine_color":   "黄",
+				"fever_pattern": "高热",
+			},
+			step4: map[string]interface{}{"tongue_color": "红", "tongue_coating": "黄"},
+			step5: map[string]interface{}{"pulse_shape": []interface{}{"洪", "大"}},
+			wantMeridian:  models.MeridianYangming,
+			wantFormulaID: "baihu_tang",
+		},
+		{
+			// 少阴热化: the differentiating counterpart of 少阴虚寒 (四逆汤). Both
+			// are 少阴, but 热化 is 阴虚火旺 (心烦不得卧+舌红少苔+脉细数) vs 寒化's
+			// 阳虚寒盛 (但欲寐+肢冷+舌淡+脉微). The wizard maps EVERY 少阴 sign to a
+			// COLD presentation (嗜睡/口渴但不想喝/畏寒/尿频), so a 热化 patient's
+			// heat signs (舌红→阳明, 脉数→阳明, 入睡难→少阳) all bleed away from
+			// 少阴 — structurally unreachable by single-sign counting, exactly as
+			// 厥阴 was before its cold-heat-complex detector. The case is
+			// validation-first: it drove the 少阴热化 detector in step 6 (舌红少苔
+			// = 阴虚, with no 阳明实热 to rule it out). Its 主方 黄连阿胶汤 is not
+			// wizard-selectable (心烦不得卧/心烦失眠 share no bigram with 入睡难),
+			// the same formal↔colloquial gap as 乌梅丸 — so it is meridianOnly.
+			name: "少阴热化 -> 黄连阿胶汤",
+			step1: map[string]interface{}{
+				"age": 50, "gender": "女", "chief_complaint": "心烦失眠一周",
+				"history": "心烦不得卧，入睡困难，手足心热",
+			},
+			step3: map[string]interface{}{
+				"sleep_onset": "入睡难", // 心烦不得卧 → 少阳 (bleeds away from 少阴)
+				"taste":       "口干",   // 阴虚口干 → 阳明 (虚热, not 实热)
+			},
+			step4: map[string]interface{}{"tongue_color": "红", "tongue_coating": "无苔"},
+			step5: map[string]interface{}{"pulse_shape": []interface{}{"细"}, "pulse_speed": "数（快）"},
+			wantMeridian:  models.MeridianShaoyin,
+			wantFormulaID: "huanglian_ejiao_tang",
+			meridianOnly:  true, // 少阴热化 主方 not wizard-selectable; see loop comment
+		},
 	}
 
 	meridianOK, exactOK, familyOK, formulaEligible := 0, 0, 0, 0
@@ -200,8 +290,11 @@ func TestDiagnosticAccuracy(t *testing.T) {
 			// severity tie. Log it; exclude from the formula-accuracy stats.
 			if tc.meridianOnly {
 				if session.SelectedFormula != nil {
-					t.Logf("formula (known gap): %s (厥阴主方) not wizard-selectable; engine picked %s — needs LLM/free-text intake",
+					t.Logf("formula (known gap): %s not wizard-selectable; engine picked %s — needs LLM/free-text intake",
 						tc.wantFormulaID, session.SelectedFormula.ID)
+				} else {
+					t.Logf("formula (known gap): %s not wizard-selectable; no candidate matched at all — needs LLM/free-text intake",
+						tc.wantFormulaID)
 				}
 				return
 			}
