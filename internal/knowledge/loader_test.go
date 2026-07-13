@@ -35,13 +35,15 @@ func TestLoadAll(t *testing.T) {
 
 	// Verify formulas loaded correctly. 108 unique formula IDs across the .md
 	// files, minus the 承气汤类 aggregate overview (a "X类" comparison doc whose
-	// members 大/小/调胃承气汤 each have their own dedicated file) → 107 loaded.
+	// members 大/小/调胃承气汤 each have their own dedicated file) and the 乌梅丸
+	// pill-form stub (wumei_wan_wan.md, every section "同乌梅丸" — a non-formula
+	// restatement) → 106 loaded.
 	// (index.md files are skipped as navigation. Three former filename-spelling
 	// duplicates were consolidated — 桂枝加芍药汤 shaoyao/shao_yao, 半夏散及汤
 	// san_ji/san, 茯苓桂枝甘草大枣汤 gancao/ganzao — each keeping the canonical
 	// spelling. Plus 桂枝加大黄汤, earlier consolidated across taiyin/+other/.)
-	if stats.FormulaCount != 107 {
-		t.Errorf("Expected 107 formulas, got %d", stats.FormulaCount)
+	if stats.FormulaCount != 106 {
+		t.Errorf("Expected 106 formulas, got %d", stats.FormulaCount)
 	}
 
 	// Verify herbs loaded correctly
@@ -498,6 +500,37 @@ func TestAggregateOverviewExcluded(t *testing.T) {
 		if strings.HasSuffix(f.Name, "类") {
 			t.Errorf("aggregate overview leaked into loader: id=%s name=%q", id, f.Name)
 		}
+	}
+}
+
+// TestWumeiWanStubExcluded: 乌梅丸 had a 31-line stub duplicate, wumei_wan_wan.md
+// ("乌梅丸（丸剂）药证详解"), whose every section read "同乌梅丸" — a non-formula
+// restatement of the pill dosage form carrying no original 方证要点, composition,
+// or 药证. It loaded under its own ID (wumei_wan_wan), inflating the unique count
+// and adding an empty-shelled 厥阴 candidate. The stub is deleted; the canonical
+// wumei_wan.md (201 lines, full 方证对照表) is the sole source — and the jueyin
+// index.md links only to it.
+func TestWumeiWanStubExcluded(t *testing.T) {
+	skipShort(t)
+	loader := NewLoader("../../docs")
+	if err := loader.LoadAll(); err != nil {
+		t.Fatalf("LoadAll: %v", err)
+	}
+	if f := loader.GetFormula("wumei_wan_wan"); f != nil {
+		t.Errorf("stub wumei_wan_wan must not be loaded as a formula, got %+v", f)
+	}
+	// Canonical 乌梅丸 must remain with full content and correct meridian.
+	f := loader.GetFormula("wumei_wan")
+	if f == nil {
+		t.Fatal("canonical wumei_wan not loaded")
+	}
+	if f.Meridian != models.MeridianJueyin {
+		t.Errorf("wumei_wan Meridian: got %v, want MeridianJueyin (厥阴主方)", f.Meridian)
+	}
+	// Full doc's 方证对照表 has 8 rows (消渴/气上撞心/心中疼热/饥而不欲食/食则吐蛔/
+	// 时静时烦/厥热往来/久利). Require several so a stub ("同乌梅丸" only) could never pass.
+	if len(f.KeySymptoms) < 5 {
+		t.Errorf("wumei_wan KeySymptoms: got %d, want ≥5 (full 方证对照表, not a stub)", len(f.KeySymptoms))
 	}
 }
 
