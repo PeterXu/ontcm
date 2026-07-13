@@ -153,6 +153,16 @@ func (l *Loader) loadFormulaFile(filePath string, meridian models.MeridianType) 
 		formula.Name = formulaIDToChinese(formulaID)
 	}
 
+	// Skip aggregate overview docs — titles like "X类药证详解" (e.g. 承气汤类)
+	// compare several formulas in one file. The parser merges their sub-tables
+	// into over-broad KeySymptoms/DrugSyndromes, so an aggregate over-matches
+	// and, once step 8 scores herbs, out-scores the very formulas it summarizes.
+	// Each member already has its own dedicated doc (大/小/调胃承气汤), so the
+	// overview is reference material, not a prescribable formula.
+	if strings.HasSuffix(formula.Name, "类") {
+		return nil
+	}
+
 	// Extract composition table (方剂组成)
 	// Section titles have prefix like "二、" so we need substring matching
 	for sectionTitle, section := range doc.Sections {

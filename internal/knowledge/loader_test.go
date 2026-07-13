@@ -33,14 +33,15 @@ func TestLoadAll(t *testing.T) {
 	t.Logf("Loaded %d formulas, %d herbs, %d errors",
 		stats.FormulaCount, stats.HerbCount, stats.ErrorCount)
 
-	// Verify formulas loaded correctly. 108 formula .md files → 108 unique
-	// formula IDs. (index.md files are skipped as navigation. Three former
-	// filename-spelling duplicates were consolidated — 桂枝加芍药汤 shaoyao/
-	// shao_yao, 半夏散及汤 san_ji/san, 茯苓桂枝甘草大枣汤 gancao/ganzao — each
-	// keeping the canonical spelling. Plus 桂枝加大黄汤, earlier consolidated
-	// across taiyin/+other/.)
-	if stats.FormulaCount != 108 {
-		t.Errorf("Expected 108 formulas, got %d", stats.FormulaCount)
+	// Verify formulas loaded correctly. 108 unique formula IDs across the .md
+	// files, minus the 承气汤类 aggregate overview (a "X类" comparison doc whose
+	// members 大/小/调胃承气汤 each have their own dedicated file) → 107 loaded.
+	// (index.md files are skipped as navigation. Three former filename-spelling
+	// duplicates were consolidated — 桂枝加芍药汤 shaoyao/shao_yao, 半夏散及汤
+	// san_ji/san, 茯苓桂枝甘草大枣汤 gancao/ganzao — each keeping the canonical
+	// spelling. Plus 桂枝加大黄汤, earlier consolidated across taiyin/+other/.)
+	if stats.FormulaCount != 107 {
+		t.Errorf("Expected 107 formulas, got %d", stats.FormulaCount)
 	}
 
 	// Verify herbs loaded correctly
@@ -474,6 +475,28 @@ func TestDrugSyndromeSchemaB(t *testing.T) {
 	for herb := range want {
 		if !seen[herb] {
 			t.Errorf("DrugSyndromes missing HerbName %q (got %v)", herb, seen)
+		}
+	}
+}
+
+// TestAggregateOverviewExcluded: the 承气汤类 doc ("X类药证详解") is an overview
+// comparing 大/小/调胃承气汤 in one file. Its merged sub-tables produce over-broad
+// KeySymptoms/DrugSyndromes that over-match and (once step 8 scores herbs)
+// out-score the real formulas it summarizes. Each member has its own dedicated
+// doc, so the aggregate must be excluded from the loader — and no loaded
+// formula may carry a "类" name.
+func TestAggregateOverviewExcluded(t *testing.T) {
+	skipShort(t)
+	loader := NewLoader("../../docs")
+	if err := loader.LoadAll(); err != nil {
+		t.Fatalf("LoadAll: %v", err)
+	}
+	if f := loader.GetFormula("chengqi_tang"); f != nil {
+		t.Errorf("aggregate chengqi_tang must not be loaded as a formula, got %+v", f)
+	}
+	for id, f := range loader.Formulas {
+		if strings.HasSuffix(f.Name, "类") {
+			t.Errorf("aggregate overview leaked into loader: id=%s name=%q", id, f.Name)
 		}
 	}
 }

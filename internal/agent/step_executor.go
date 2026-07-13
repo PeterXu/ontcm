@@ -307,19 +307,17 @@ func (a *DiagnosticAgent) executeStep8(session *models.DiagnosticSession, input 
 			continue
 		}
 
-		// Check each herb in the formula
+		// Count each herb at most once: a herb adds to the score if any of its
+		// DrugSyndromes targets a symptom the patient actually has.
 		herbsWithEvidence := 0
 		for _, herb := range formula.Composition {
-			// Check if herb's DrugSyndromes match collected symptoms
 			for _, syndrome := range formula.DrugSyndromes {
-				if syndrome.HerbName == herb.Name {
-					// Check if target symptom is in collected symptoms
-					for _, symptom := range session.Symptoms {
-						if strings.Contains(symptom.Symptom, syndrome.TargetSymptom) {
-							herbsWithEvidence++
-							break
-						}
-					}
+				if syndrome.HerbName != herb.Name {
+					continue
+				}
+				if drugMatchesAnySymptom(syndrome.TargetSymptom, session.Symptoms) {
+					herbsWithEvidence++
+					break // one count per herb, not per matching syndrome
 				}
 			}
 		}
@@ -329,6 +327,66 @@ func (a *DiagnosticAgent) executeStep8(session *models.DiagnosticSession, input 
 	}
 
 	return nil
+}
+
+// drugMatchesAnySymptom reports whether any term of a drug's TargetSymptom
+// appears in any collected patient symptom. The docs express a drug's target as
+// a 、-joined list ("乏力、少气懒言"), often with a （…） annotation
+// ("小便不利（湿阻）"); we strip the annotation and split into terms, then accept
+// a term-level substring match against the "label: value" patient-symptom
+// strings. The previous whole-phrase strings.Contains matched almost nothing
+// (the patient string never contains the entire list verbatim), leaving step 8
+// inert — term-level matching is what actually lights it up.
+func drugMatchesAnySymptom(target string, symptoms []models.SymptomEvidence) bool {
+	target = stripParen(target)
+	for _, term := range splitTargetTerms(target) {
+		for _, s := range symptoms {
+			if strings.Contains(s.Symptom, term) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// stripParen removes （…） and (...) annotations from s.
+func stripParen(s string) string {
+	for _, p := range [][2]string{{"（", "）"}, {"(", ")"}} {
+		open, close := p[0], p[1]
+		for {
+			i := strings.Index(s, open)
+			if i < 0 {
+				break
+			}
+			rest := s[i+len(open):]
+			j := strings.Index(rest, close)
+			if j < 0 {
+				s = s[:i] // unclosed — drop from the opening onward
+				break
+			}
+			s = s[:i] + rest[j+len(close):]
+		}
+	}
+	return s
+}
+
+// splitTargetTerms splits a (already de-annotated) TargetSymptom on 、, ，, ,
+// and spaces, dropping empties and dash placeholders that mean "no symptom".
+func splitTargetTerms(target string) []string {
+	var terms []string
+	for _, term := range strings.FieldsFunc(target, func(r rune) bool {
+		return r == '、' || r == '，' || r == ',' || r == ' '
+	}) {
+		term = strings.TrimSpace(term)
+		if term == "" {
+			continue
+		}
+		if term == "—" || term == "–" || term == "-" {
+			continue
+		}
+		terms = append(terms, term)
+	}
+	return terms
 }
 
 // executeStep9 counts supporting evidence
