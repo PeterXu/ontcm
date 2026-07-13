@@ -29,10 +29,17 @@ package agent
 // happened to use). 阳明 reaches the 承气 family via step-7 symptom matching
 // regardless, so omitting the bridge loses nothing and preserves the LLM path.
 var drugSymptomAliases = map[string][]string{
+	// Loose-stool cluster (formal 古 form → colloquial 十问 forms).
 	"大便稀": {"稀软", "便溏", "稀便", "溏便", "腹泻"},
-	"食欲差": {"不想吃", "纳差", "食欲不振", "没胃口"},
-	"食少":  {"不想吃", "纳差", "食欲不振", "没胃口"},
-	"纳呆":  {"不想吃", "纳差", "食欲不振", "没胃口"},
+	"便稀":  {"稀软", "便溏", "稀便", "溏便", "腹泻"},
+	// Poor-appetite cluster. 吃得少 is a 十问 wizard option; 不欲饮食 is the
+	// classical equivalent (e.g. 小柴胡汤's 默默不欲饮食).
+	"食欲差":  {"不想吃", "纳差", "食欲不振", "没胃口", "吃得少"},
+	"食少":   {"不想吃", "纳差", "食欲不振", "没胃口", "吃得少"},
+	"纳呆":   {"不想吃", "纳差", "食欲不振", "没胃口", "吃得少"},
+	"不欲饮食": {"不想吃", "纳差", "食欲不振", "没胃口", "吃得少"},
+	// Joint pain: classical 骨节 vs modern 关节.
+	"骨节痛": {"关节痛"},
 }
 
 // aliasesFor returns the patient-side colloquial aliases for a formal drug

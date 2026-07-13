@@ -145,8 +145,12 @@ func TestDrugMatchesViaAlias(t *testing.T) {
 	}{
 		{"大便稀 drug vs 稀软 patient", "大便稀", []string{"大便形状: 稀软"}, true},
 		{"大便稀 drug vs 便溏 patient", "大便稀", []string{"大便形状: 便溏"}, true},
+		{"便稀 drug vs 稀软 patient (same concept)", "便稀", []string{"大便形状: 稀软"}, true},
 		{"食欲差 drug vs 不想吃 patient", "食欲差", []string{"食欲如何: 不想吃"}, true},
 		{"食少 drug vs 纳差 patient", "食少", []string{"食欲如何: 纳差"}, true},
+		{"食少 drug vs 吃得少 patient (wizard option)", "食少", []string{"食欲如何: 吃得少"}, true},
+		{"不欲饮食 drug vs 不想吃 patient", "不欲饮食", []string{"食欲如何: 不想吃"}, true},
+		{"骨节痛 drug vs 关节痛 patient (classical vs modern joint)", "骨节痛", []string{"疼痛部位: 关节痛"}, true},
 		{"multi-term target, alias is the 2nd term", "腹痛、大便稀", []string{"大便形状: 稀软"}, true},
 		// Negative guards: aliases must not over-match unrelated symptoms.
 		{"unrelated symptom still no match", "大便稀", []string{"汗出情况: 无汗"}, false},
