@@ -337,12 +337,20 @@ func (a *DiagnosticAgent) executeStep8(session *models.DiagnosticSession, input 
 // strings. The previous whole-phrase strings.Contains matched almost nothing
 // (the patient string never contains the entire list verbatim), leaving step 8
 // inert — term-level matching is what actually lights it up.
+//
+// Each term is also checked against its patient-side aliases (see synonyms.go):
+// the docs use formal/古 forms (大便稀) while the patient reports colloquial
+// forms (稀软) that share no characters, so a bare substring match would miss
+// them despite denoting the same sign.
 func drugMatchesAnySymptom(target string, symptoms []models.SymptomEvidence) bool {
 	target = stripParen(target)
 	for _, term := range splitTargetTerms(target) {
-		for _, s := range symptoms {
-			if strings.Contains(s.Symptom, term) {
-				return true
+		needles := append([]string{term}, aliasesFor(term)...)
+		for _, needle := range needles {
+			for _, s := range symptoms {
+				if strings.Contains(s.Symptom, needle) {
+					return true
+				}
 			}
 		}
 	}

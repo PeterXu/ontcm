@@ -130,3 +130,60 @@ func TestHerbMatches(t *testing.T) {
 		})
 	}
 }
+
+// TestDrugMatchesViaAlias covers the patient↔drug synonym bridge: a drug term
+// written in formal/古 form must also match the colloquial patient expression
+// a symptom means the same thing. Keys are the formal drug forms; values are
+// the colloquial patient forms. Direction matters and the set is deliberately
+// minimal — only clinically unambiguous mappings the canonical cases exercise.
+func TestDrugMatchesViaAlias(t *testing.T) {
+	cases := []struct {
+		name     string
+		target   string
+		symptoms []string
+		want     bool
+	}{
+		{"大便稀 drug vs 稀软 patient", "大便稀", []string{"大便形状: 稀软"}, true},
+		{"大便稀 drug vs 便溏 patient", "大便稀", []string{"大便形状: 便溏"}, true},
+		{"食欲差 drug vs 不想吃 patient", "食欲差", []string{"食欲如何: 不想吃"}, true},
+		{"食少 drug vs 纳差 patient", "食少", []string{"食欲如何: 纳差"}, true},
+		{"multi-term target, alias is the 2nd term", "腹痛、大便稀", []string{"大便形状: 稀软"}, true},
+		// Negative guards: aliases must not over-match unrelated symptoms.
+		{"unrelated symptom still no match", "大便稀", []string{"汗出情况: 无汗"}, false},
+		{"no alias, no shared char", "小便不利", []string{"大便形状: 稀软"}, false},
+		// Direct (non-alias) match must still work alongside aliases.
+		{"direct match still works", "无汗", []string{"汗出情况: 无汗"}, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			symptoms := make([]models.SymptomEvidence, len(c.symptoms))
+			for i, s := range c.symptoms {
+				symptoms[i] = models.SymptomEvidence{Symptom: s}
+			}
+			if got := drugMatchesAnySymptom(c.target, symptoms); got != c.want {
+				t.Errorf("drugMatchesAnySymptom(%q, %v) = %v, want %v", c.target, c.symptoms, got, c.want)
+			}
+		})
+	}
+}
+
+// TestAliasesForDirectional locks the synonym table's direction: keys are the
+// formal/古 drug forms, values the colloquial patient forms. A look-up by a
+// patient form must return nothing (the bridge is applied at drug-term time,
+// not patient-string time), and the bridge must be conservative — vague
+// overlaps stay unmapped.
+func TestAliasesForDirectional(t *testing.T) {
+	for _, formal := range []string{"大便稀", "食欲差", "食少"} {
+		if got := aliasesFor(formal); len(got) == 0 {
+			t.Errorf("aliasesFor(%q) returned no aliases — formal drug term must map to patient forms", formal)
+		}
+	}
+	// A patient-side colloquial form is not itself a key.
+	if got := aliasesFor("稀软"); len(got) != 0 {
+		t.Errorf("aliasesFor(%q) = %v; colloquial patient form must not be a key (directional table)", "稀软", got)
+	}
+	// Deliberately unmapped: 胸胁苦满 (fullness) vs 胁痛 (pain) are NOT synonyms.
+	if got := aliasesFor("胸胁苦满"); len(got) != 0 {
+		t.Errorf("aliasesFor(%q) = %v; fullness-vs-pain must stay unmapped", "胸胁苦满", got)
+	}
+}
